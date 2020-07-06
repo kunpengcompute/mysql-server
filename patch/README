@@ -1,1 +1,7 @@
 this folder stores MySQL patch files.
+1. 0001-ARM-Buffer-Pool-NUMA-Aware.patch
+    Allocate buffer pool on different NUMA nodes,Based on the partition data volume of the table.
+2. 0001-ARM-TRX_SYS-Hash-Table.patch
+    use the lock-free hash table to redefine trx_sys lock
+3. 0001-MYSQL-BINLOG-CRC32-ARM-INNOBASE-CRC32C-ARM.patch.
+    use the crc32 instruction of arm to accelerate the crc32 verification in binlog and innobase.
