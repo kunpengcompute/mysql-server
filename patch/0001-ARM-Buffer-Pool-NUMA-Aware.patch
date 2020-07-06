@@ -1,0 +1,754 @@
+From e1dc31523500e92e0b9db3ca06174cf022f48b4a Mon Sep 17 00:00:00 2001
+From: z00347042 <zhuqi1@huawei.com>
+Date: Thu, 11 Jun 2020 15:47:20 +0800
+Subject: [PATCH] =?UTF-8?q?ARM=20Buffer=20Pool=20NUMA=20Aware=E4=BC=98?=
+ =?UTF-8?q?=E5=8C=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../sys_vars/r/innodb_numa_aware_basic.result      | 10 ++++++
+ .../sys_vars/t/innodb_numa_aware_basic-master.opt  |  1 +
+ .../suite/sys_vars/t/innodb_numa_aware_basic.test  | 14 ++++++++
+ sql/dd/impl/types/table_impl.h                     |  7 ++++
+ sql/dd/types/table.h                               |  2 ++
+ sql/handler.h                                      |  2 ++
+ sql/lex.h                                          |  1 +
+ sql/parse_tree_nodes.h                             |  5 +++
+ sql/sql_tablespace.cc                              |  1 +
+ sql/sql_tablespace.h                               |  1 +
+ sql/sql_yacc.yy                                    | 11 ++++++
+ storage/innobase/btr/btr0btr.cc                    |  3 +-
+ storage/innobase/buf/buf0buf.cc                    | 39 +++++++++++++++++++++
+ storage/innobase/dict/dict0crea.cc                 |  1 +
+ storage/innobase/fil/fil0fil.cc                    |  8 +++--
+ storage/innobase/fsp/fsp0file.cc                   |  6 ++--
+ storage/innobase/handler/ha_innodb.cc              | 11 ++++++
+ storage/innobase/handler/ha_innopart.cc            |  5 +++
+ storage/innobase/include/buf0buf.h                 |  5 +++
+ storage/innobase/include/buf0buf.ic                | 40 +++++++++++++++++++++-
+ storage/innobase/include/dict0mem.h                |  3 ++
+ storage/innobase/include/fil0fil.h                 |  3 ++
+ storage/innobase/include/fsp0fsp.ic                |  2 +-
+ storage/innobase/include/fsp0space.h               | 13 +++++++
+ storage/innobase/include/fsp0types.h               | 28 +++++++++++++--
+ storage/innobase/include/os0numa.h                 |  7 ++++
+ storage/innobase/include/srv0srv.h                 |  2 ++
+ storage/innobase/srv/srv0srv.cc                    |  2 ++
+ 28 files changed, 223 insertions(+), 10 deletions(-)
+ create mode 100644 mysql-test/suite/sys_vars/r/innodb_numa_aware_basic.result
+ create mode 100644 mysql-test/suite/sys_vars/t/innodb_numa_aware_basic-master.opt
+ create mode 100644 mysql-test/suite/sys_vars/t/innodb_numa_aware_basic.test
+
+diff --git a/mysql-test/suite/sys_vars/r/innodb_numa_aware_basic.result b/mysql-test/suite/sys_vars/r/innodb_numa_aware_basic.result
+new file mode 100644
+index 0000000..43756f1
+--- /dev/null
++++ b/mysql-test/suite/sys_vars/r/innodb_numa_aware_basic.result
+@@ -0,0 +1,10 @@
++SELECT @@GLOBAL.innodb_numa_aware;
++@@GLOBAL.innodb_numa_aware
++1
++SET @@GLOBAL.innodb_numa_aware=off;
++ERROR HY000: Variable 'innodb_numa_aware' is a read only variable
++SELECT @@GLOBAL.innodb_numa_aware;
++@@GLOBAL.innodb_numa_aware
++1
++SELECT @@SESSION.innodb_numa_aware;
++ERROR HY000: Variable 'innodb_numa_aware' is a GLOBAL variable
+diff --git a/mysql-test/suite/sys_vars/t/innodb_numa_aware_basic-master.opt b/mysql-test/suite/sys_vars/t/innodb_numa_aware_basic-master.opt
+new file mode 100644
+index 0000000..e00262a
+--- /dev/null
++++ b/mysql-test/suite/sys_vars/t/innodb_numa_aware_basic-master.opt
+@@ -0,0 +1 @@
++--loose-innodb_numa_aware=1
+diff --git a/mysql-test/suite/sys_vars/t/innodb_numa_aware_basic.test b/mysql-test/suite/sys_vars/t/innodb_numa_aware_basic.test
+new file mode 100644
+index 0000000..aed7943
+--- /dev/null
++++ b/mysql-test/suite/sys_vars/t/innodb_numa_aware_basic.test
+@@ -0,0 +1,14 @@
++--source include/linux.inc
++--source include/have_64bit.inc
++--source include/have_numa.inc
++
++SELECT @@GLOBAL.innodb_numa_aware;
++
++--error ER_INCORRECT_GLOBAL_LOCAL_VAR
++SET @@GLOBAL.innodb_numa_aware=off;
++
++SELECT @@GLOBAL.innodb_numa_aware;
++
++--error ER_INCORRECT_GLOBAL_LOCAL_VAR
++SELECT @@SESSION.innodb_numa_aware;
++
+diff --git a/sql/dd/impl/types/table_impl.h b/sql/dd/impl/types/table_impl.h
+index 6e8a54c..611747a 100644
+--- a/sql/dd/impl/types/table_impl.h
++++ b/sql/dd/impl/types/table_impl.h
+@@ -139,6 +139,12 @@ class Table_impl : public Abstract_table_impl, virtual public Table {
+     m_tablespace_id = tablespace_id;
+   }
+ 
++  virtual uint8 tablespace_numa_node() const { return m_numa_node; }
++
++  virtual void set_tablespace_numa_node(uint8 numa_node) {
++    m_numa_node = numa_node;
++  }
++
+   virtual bool is_explicit_tablespace() const {
+     bool is_explicit = false;
+     if (options().exists("explicit_tablespace"))
+@@ -559,6 +565,7 @@ class Table_impl : public Abstract_table_impl, virtual public Table {
+ 
+   Object_id m_collation_id;
+   Object_id m_tablespace_id;
++  uint8 m_numa_node = 0;
+ 
+   Table_impl(const Table_impl &src);
+   Table_impl *clone() const { return new Table_impl(*this); }
+diff --git a/sql/dd/types/table.h b/sql/dd/types/table.h
+index b9955b4..0b53e2b 100644
+--- a/sql/dd/types/table.h
++++ b/sql/dd/types/table.h
+@@ -135,6 +135,8 @@ class Table : virtual public Abstract_table {
+ 
+   virtual Object_id tablespace_id() const = 0;
+   virtual void set_tablespace_id(Object_id tablespace_id) = 0;
++  virtual uint8 tablespace_numa_node() const = 0;
++  virtual void set_tablespace_numa_node(uint8 numa_node) = 0;
+   virtual bool is_explicit_tablespace() const = 0;
+ 
+   /////////////////////////////////////////////////////////////////////////
+diff --git a/sql/handler.h b/sql/handler.h
+index 516ac0d..62568b5 100644
+--- a/sql/handler.h
++++ b/sql/handler.h
+@@ -791,6 +791,7 @@ struct st_handler_tablename {
+   on add/drop/change tablespace definitions to the proper hton.
+ */
+ #define UNDEF_NODEGROUP 65535
++#define UNDEF_NUMA 0
+ 
+ // FUTURE: Combine these two enums into one enum class
+ enum ts_command_type {
+@@ -839,6 +840,7 @@ class st_alter_tablespace {
+   ulonglong autoextend_size = 0;                 // No autoextension as default
+   ulonglong max_size = 0;         // Max size == initial size => no extension
+   ulonglong file_block_size = 0;  // 0=default or must be a valid Page Size
++  uint8 numa_node =   UNDEF_NUMA;
+   uint nodegroup_id = UNDEF_NODEGROUP;
+   bool wait_until_completed = true;
+   const char *ts_comment = nullptr;
+diff --git a/sql/lex.h b/sql/lex.h
+index febbf6d..b2dda94 100644
+--- a/sql/lex.h
++++ b/sql/lex.h
+@@ -463,6 +463,7 @@ static const SYMBOL symbols[] = {
+     {SYM("NTILE", NTILE_SYM)},
+     {SYM("NULL", NULL_SYM)},
+     {SYM("NULLS", NULLS_SYM)},
++    {SYM("NUMA", NUMA_NODE_SYM)},
+     {SYM("NUMBER", NUMBER_SYM)},
+     {SYM("NUMERIC", NUMERIC_SYM)},
+     {SYM("NVARCHAR", NVARCHAR_SYM)},
+diff --git a/sql/parse_tree_nodes.h b/sql/parse_tree_nodes.h
+index 2fb482f..c66c3f4 100644
+--- a/sql/parse_tree_nodes.h
++++ b/sql/parse_tree_nodes.h
+@@ -4312,6 +4312,11 @@ typedef PT_alter_tablespace_option<decltype(
+                                    &Tablespace_options::undo_buffer_size>
+     PT_alter_tablespace_option_undo_buffer_size;
+ 
++typedef PT_alter_tablespace_option<decltype(
++                                       Tablespace_options::numa_node),
++                                   &Tablespace_options::numa_node>
++    PT_alter_tablespace_option_numa_node;
++
+ typedef PT_alter_tablespace_option<
+     decltype(Tablespace_options::wait_until_completed),
+     &Tablespace_options::wait_until_completed>
+diff --git a/sql/sql_tablespace.cc b/sql/sql_tablespace.cc
+index 0cdee5f..80ec9a2 100644
+--- a/sql/sql_tablespace.cc
++++ b/sql/sql_tablespace.cc
+@@ -106,6 +106,7 @@ st_alter_tablespace::st_alter_tablespace(
+       autoextend_size{opts.autoextend_size},
+       max_size{opts.max_size},
+       file_block_size{opts.file_block_size},
++      numa_node{opts.numa_node},
+       nodegroup_id{opts.nodegroup_id},
+       wait_until_completed{opts.wait_until_completed},
+       ts_comment{opts.ts_comment.str} {}
+diff --git a/sql/sql_tablespace.h b/sql/sql_tablespace.h
+index 5976d8e..23bcd60 100644
+--- a/sql/sql_tablespace.h
++++ b/sql/sql_tablespace.h
+@@ -45,6 +45,7 @@ struct Tablespace_options {
+   ulonglong autoextend_size = 0;                 // No autoextension as default
+   ulonglong max_size = 0;         // Max size == initial size => no extension
+   ulonglong file_block_size = 0;  // 0=default or must be a valid Page Size
++  uint8 numa_node = UNDEF_NUMA;
+   uint nodegroup_id = UNDEF_NODEGROUP;
+   bool wait_until_completed = true;
+   LEX_STRING ts_comment = {nullptr, 0};  // FIXME: Rename to comment?
+diff --git a/sql/sql_yacc.yy b/sql/sql_yacc.yy
+index a2c5492..c58ac57 100644
+--- a/sql/sql_yacc.yy
++++ b/sql/sql_yacc.yy
+@@ -1189,6 +1189,7 @@ void warn_about_deprecated_binary(THD *thd)
+ %token  NTH_VALUE_SYM                 /* SQL-2011-R */
+ %token  NTILE_SYM                     /* SQL-2011-R */
+ %token<lexer.keyword> NULLS_SYM             /* SQL-2003-N */
++%token<lexer.keyword> NUMA_NODE_SYM
+ %token<lexer.keyword> OTHERS_SYM            /* SQL-2003-N */
+ %token  OVER_SYM                      /* SQL-2003-R */
+ %token  PERCENT_RANK_SYM              /* SQL-2003-R */
+@@ -1928,6 +1929,7 @@ void warn_about_deprecated_binary(THD *thd)
+         ts_option_initial_size
+         ts_option_max_size
+         ts_option_nodegroup
++        ts_option_numa_node
+         ts_option_redo_buffer_size
+         ts_option_undo_buffer_size
+         ts_option_wait
+@@ -5311,6 +5313,7 @@ tablespace_option:
+         | ts_option_max_size
+         | ts_option_extent_size
+         | ts_option_nodegroup
++        | ts_option_numa_node
+         | ts_option_engine
+         | ts_option_wait
+         | ts_option_comment
+@@ -5482,6 +5485,13 @@ ts_option_redo_buffer_size:
+           }
+         ;
+ 
++ts_option_numa_node:
++          NUMA_NODE_SYM opt_equal size_number
++          {
++            $$= NEW_PTN PT_alter_tablespace_option_numa_node($3);
++          }
++        ;
++
+ ts_option_nodegroup:
+           NODEGROUP_SYM opt_equal real_ulong_num
+           {
+@@ -14518,6 +14528,7 @@ ident_keywords_unambiguous:
+         | NOWAIT_SYM
+         | NO_WAIT_SYM
+         | NULLS_SYM
++        | NUMA_NODE_SYM
+         | NUMBER_SYM
+         | NVARCHAR_SYM
+         | OFFSET_SYM
+diff --git a/storage/innobase/btr/btr0btr.cc b/storage/innobase/btr/btr0btr.cc
+index 19f8778..c242745 100644
+--- a/storage/innobase/btr/btr0btr.cc
++++ b/storage/innobase/btr/btr0btr.cc
+@@ -284,10 +284,11 @@ dberr_t btr_root_adjust_on_import(
+       uint32_t flags = dict_tf_to_fsp_flags(table->flags);
+       uint32_t fsp_flags = fil_space_get_flags(table->space);
+ 
+-      /* We remove SDI flag from space flags temporarily for
++      /* We remove SDI/NUMA_NODE flag from space flags temporarily for
+       comparison because the space flags derived from table
+       flags will not have SDI flag */
+       fsp_flags_unset_sdi(fsp_flags);
++      fsp_flags_unset_numa_node(fsp_flags);
+ 
+       /* As encryption is not a table property, we don't keep
+       any encryption property related flag in table. Thus
+diff --git a/storage/innobase/buf/buf0buf.cc b/storage/innobase/buf/buf0buf.cc
+index 983603e..7ad9908 100644
+--- a/storage/innobase/buf/buf0buf.cc
++++ b/storage/innobase/buf/buf0buf.cc
+@@ -292,6 +292,9 @@ static const ulint BUF_READ_AHEAD_PORTION = 32;
+ /** The buffer pools of the database */
+ buf_pool_t *buf_pool_ptr;
+ 
++thread_local bool numa_bind_flag = false;
++thread_local int  thread_numa_node = 0;
++
+ /** true when resizing buffer pool is in the critical path. */
+ volatile bool buf_pool_resizing;
+ 
+@@ -1011,6 +1014,24 @@ static buf_chunk_t *buf_chunk_init(
+                                 " (error: "
+                              << strerror(errno) << ").";
+     }
++  } else if (srv_numa_aware) {
++    nodemask_t bufpool_nodemask;
++    struct bitmask * bindmask = numa_bitmask_alloc(numa_num_possible_nodes());
++
++    numa_bitmask_clearall(bindmask);
++    numa_bitmask_setbit(bindmask, buf_pool->numa_node);
++    copy_bitmask_to_nodemask(bindmask, &bufpool_nodemask);
++    numa_bitmask_free(bindmask);
++
++    int st = mbind(chunk->mem, chunk->mem_size(), MPOL_BIND,
++                   bufpool_nodemask.n, numa_all_nodes_ptr->size,
++                   MPOL_MF_MOVE);
++    if (st != 0) {
++      ib::warn(ER_IB_MSG_54) << "Failed to set NUMA memory policy of"
++                                " buffer pool page frames to MPOL_BIND"
++                                " (error: "
++                             << strerror(errno) << ").";
++    }
+   }
+ #endif /* HAVE_LIBNUMA */
+ 
+@@ -1220,6 +1241,18 @@ static void buf_pool_create(buf_pool_t *buf_pool, ulint buf_pool_size,
+   setpriority(PRIO_PROCESS, (pid_t)syscall(SYS_gettid), -20);
+ #endif /* UNIV_LINUX */
+ 
++#ifdef HAVE_LIBNUMA
++  if (srv_numa_aware) {
++    buf_pool->numa_node = instance_no % numa_node_num;
++    unsigned long nodemask = 1 << buf_pool->numa_node;
++    if (set_mempolicy(MPOL_BIND, &nodemask, sizeof(nodemask)) != 0) {
++      ib::warn(ER_IB_MSG_48) << "Failed to set NUMA memory"
++                                " policy to MPOL_BIND: "
++                             << strerror(errno);
++    }
++  }
++#endif /* HAVE_LIBNUMA */
++
+   ut_ad(buf_pool_size % srv_buf_pool_chunk_unit == 0);
+ 
+   /* 1. Initialize general fields
+@@ -1441,6 +1474,12 @@ dberr_t buf_pool_init(ulint total_size, ulint n_instances) {
+ 
+   NUMA_MEMPOLICY_INTERLEAVE_IN_SCOPE;
+ 
++#ifdef HAVE_LIBNUMA
++  if (srv_numa_aware) {
++    numa_node_num = os_numa_num_configured_nodes();
++  }
++#endif /* HAVE_LIBNUMA */
++
+   /* Usually buf_pool_should_madvise is protected by buf_pool_t::chunk_mutex-es,
+   but at this point in time there is no buf_pool_t instances yet, and no risk of
+   race condition with sys_var modifications or buffer pool resizing because we
+diff --git a/storage/innobase/dict/dict0crea.cc b/storage/innobase/dict/dict0crea.cc
+index 9d068bf..d06a29e 100644
+--- a/storage/innobase/dict/dict0crea.cc
++++ b/storage/innobase/dict/dict0crea.cc
+@@ -214,6 +214,7 @@ dberr_t dict_build_tablespace_for_table(dict_table_t *table, trx_t *trx) {
+     if (DICT_TF2_FLAG_IS_SET(table, DICT_TF2_ENCRYPTION_FILE_PER_TABLE)) {
+       fsp_flags_set_encryption(fsp_flags);
+     }
++    fsp_flags_set_numa_node(fsp_flags, table->numa_node);
+ 
+     if (DICT_TF_HAS_DATA_DIR(table->flags)) {
+       std::string path;
+diff --git a/storage/innobase/fil/fil0fil.cc b/storage/innobase/fil/fil0fil.cc
+index 030ee54..bc10c94 100644
+--- a/storage/innobase/fil/fil0fil.cc
++++ b/storage/innobase/fil/fil0fil.cc
+@@ -330,7 +330,7 @@ static const size_t MAX_PAGES_TO_READ = 1;
+ 
+ #ifndef UNIV_HOTBACKUP
+ /** Maximum number of shards supported. */
+-static const size_t MAX_SHARDS = 64;
++static const size_t MAX_SHARDS = 1024;
+ 
+ /** The redo log is in its own shard. */
+ static const size_t REDO_SHARD = MAX_SHARDS - 1;
+@@ -2426,8 +2426,10 @@ dberr_t Fil_shard::get_file_size(fil_node_t *file, bool read_only_mode) {
+         << " (flags=" << ib::hex(space->flags) << ")!";
+   }
+ 
+-  /* If the SDI flag is set in the file header page, set it in space->flags. */
++  /* If the SDI/NUMA_NODE flag is set in the file header page, set it in space->flags. */
+   space->flags |= flags & FSP_FLAGS_MASK_SDI;
++  fsp_flags_unset_numa_node(space->flags);
++  space->flags |= flags & FSP_FLAGS_MASK_NUMA_NODE;
+ 
+ #ifndef UNIV_HOTBACKUP
+   /* It is possible that
+@@ -3102,6 +3104,8 @@ fil_space_t *Fil_shard::space_create(const char *name, space_id_t space_id,
+   ut_a(flags < std::numeric_limits<uint32_t>::max());
+   space->flags = (uint32_t)flags;
+ 
++  space->numa_node = (uint8_t)FSP_FLAGS_GET_NUMA_NODE(flags);
++
+   space->magic_n = FIL_SPACE_MAGIC_N;
+ 
+   space->encryption_type = Encryption::NONE;
+diff --git a/storage/innobase/fsp/fsp0file.cc b/storage/innobase/fsp/fsp0file.cc
+index 0906281..0b9d932 100644
+--- a/storage/innobase/fsp/fsp0file.cc
++++ b/storage/innobase/fsp/fsp0file.cc
+@@ -411,12 +411,12 @@ dberr_t Datafile::validate_to_dd(space_id_t space_id, uint32_t flags,
+   If the datafile is a file-per-table tablespace then also match
+   the row format and zip page size. */
+ 
+-  /* We exclude SDI & DATA_DIR space flags because they are not stored
++  /* We exclude SDI & DATA_DIR & NUMA_NODE space flags because they are not stored
+   in table flags in dictionary */
+ 
+   if (m_space_id == space_id &&
+       !((m_flags ^ flags) & ~(FSP_FLAGS_MASK_DATA_DIR | FSP_FLAGS_MASK_SHARED |
+-                              FSP_FLAGS_MASK_SDI))) {
++                              FSP_FLAGS_MASK_SDI | FSP_FLAGS_MASK_NUMA_NODE))) {
+     /* Datafile matches the tablespace expected. */
+     return (DB_SUCCESS);
+   }
+@@ -430,7 +430,7 @@ dberr_t Datafile::validate_to_dd(space_id_t space_id, uint32_t flags,
+   if (m_encryption_op_in_progress == ENCRYPTION &&
+       !((m_flags ^ flags) &
+         ~(FSP_FLAGS_MASK_ENCRYPTION | FSP_FLAGS_MASK_DATA_DIR |
+-          FSP_FLAGS_MASK_SHARED | FSP_FLAGS_MASK_SDI))) {
++          FSP_FLAGS_MASK_SHARED | FSP_FLAGS_MASK_SDI | FSP_FLAGS_MASK_NUMA_NODE))) {
+     return (DB_SUCCESS);
+   }
+ 
+diff --git a/storage/innobase/handler/ha_innodb.cc b/storage/innobase/handler/ha_innodb.cc
+index 75c2b84..a1bf73e 100644
+--- a/storage/innobase/handler/ha_innodb.cc
++++ b/storage/innobase/handler/ha_innodb.cc
+@@ -10801,6 +10801,8 @@ inline MY_ATTRIBUTE((warn_unused_result)) int create_table_info_t::
+ 
+   /* Set dd tablespace id */
+   table->dd_space_id = dd_space_id;
++  table->numa_node = (dd_table != nullptr ? dd_table->tablespace_numa_node()
++                                         : 0);
+ 
+   /* Set the hidden doc_id column. */
+   if (m_flags2 & (DICT_TF2_FTS | DICT_TF2_FTS_ADD_DOC_ID)) {
+@@ -14670,6 +14672,7 @@ static int innodb_create_tablespace(handlerton *hton, THD *thd,
+ 
+   /* Create the tablespace object. */
+   tablespace.set_name(alter_info->tablespace_name);
++  tablespace.set_numa_node(alter_info->numa_node);
+ 
+   dberr_t err = tablespace.add_datafile(alter_info->data_file_name);
+   if (err != DB_SUCCESS) {
+@@ -14732,6 +14735,7 @@ static int innodb_create_tablespace(handlerton *hton, THD *thd,
+                      true,         /* This is a general shared tablespace */
+                      false,      /* Temporary General Tablespaces not allowed */
+                      encrypted); /* If tablespace is to be Encrypted */
++  fsp_flags_set_numa_node(fsp_flags, tablespace.numa_node());
+   tablespace.set_flags(fsp_flags);
+ 
+   err = dict_build_tablespace(trx, &tablespace);
+@@ -21643,6 +21647,12 @@ static MYSQL_SYSVAR_BOOL(
+     PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+     "Use NUMA interleave memory policy to allocate InnoDB buffer pool.", NULL,
+     NULL, FALSE);
++
++static MYSQL_SYSVAR_BOOL(
++    numa_aware, srv_numa_aware,
++    PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
++    "Use NUMA aware memory policy to allocate InnoDB buffer pool.", NULL,
++    NULL, FALSE);
+ #endif /* HAVE_LIBNUMA */
+ 
+ static MYSQL_SYSVAR_BOOL(
+@@ -22020,6 +22030,7 @@ static SYS_VAR *innobase_system_variables[] = {
+     MYSQL_SYSVAR(use_native_aio),
+ #ifdef HAVE_LIBNUMA
+     MYSQL_SYSVAR(numa_interleave),
++    MYSQL_SYSVAR(numa_aware),
+ #endif /* HAVE_LIBNUMA */
+     MYSQL_SYSVAR(change_buffering),
+     MYSQL_SYSVAR(change_buffer_max_size),
+diff --git a/storage/innobase/handler/ha_innopart.cc b/storage/innobase/handler/ha_innopart.cc
+index e684f4e..fe7b666 100644
+--- a/storage/innobase/handler/ha_innopart.cc
++++ b/storage/innobase/handler/ha_innopart.cc
+@@ -2584,6 +2584,11 @@ int ha_innopart::create(const char *name, TABLE *form,
+ 
+     info.set_remote_path_flags();
+ 
++    if (srv_numa_aware) {
++        dd_part->table().set_tablespace_numa_node(
++            (dd_part->number() % numa_node_num) | TABLESPACE_NUMA_ENABLE);
++    }
++
+     if ((error = info.create_table(&dd_part->table())) != 0) {
+       break;
+     }
+diff --git a/storage/innobase/include/buf0buf.h b/storage/innobase/include/buf0buf.h
+index 6dacc57..8327a6e 100644
+--- a/storage/innobase/include/buf0buf.h
++++ b/storage/innobase/include/buf0buf.h
+@@ -113,6 +113,9 @@ constexpr ulint MAX_PAGE_HASH_LOCKS = 1024;
+ /** The buffer pools of the database */
+ extern buf_pool_t *buf_pool_ptr;
+ 
++extern thread_local bool numa_bind_flag;
++extern thread_local int  thread_numa_node;
++
+ /** true when withdrawing buffer pool pages might cause page relocation */
+ extern volatile bool buf_pool_withdrawing;
+ 
+@@ -1734,6 +1737,8 @@ struct buf_pool_t {
+                                 buf_block_t */
+   ulint instance_no;            /*!< Array index of this buffer
+                                 pool instance */
++  ulint numa_node;            /*!< Numa node of this buffer
++                                pool instance */
+   ulint curr_pool_size;         /*!< Current pool size in bytes */
+   ulint LRU_old_ratio;          /*!< Reserve this much of the buffer
+                                 pool for "old" blocks */
+diff --git a/storage/innobase/include/buf0buf.ic b/storage/innobase/include/buf0buf.ic
+index 63baef3..1601117 100644
+--- a/storage/innobase/include/buf0buf.ic
++++ b/storage/innobase/include/buf0buf.ic
+@@ -46,6 +46,11 @@ this program; if not, write to the Free Software Foundation, Inc.,
+ #include "fsp0types.h"
+ #include "sync0debug.h"
+ #include "ut0new.h"
++
++#ifdef HAVE_LIBNUMA
++#include <numa.h>
++#endif /* HAVE_LIBNUMA */
++
+ #endif /* !UNIV_HOTBACKUP */
+ 
+ /** A chunk of buffers. The buffer pool is allocated in chunks. */
+@@ -917,8 +922,41 @@ buf_pool_t *buf_pool_get(const page_id_t &page_id) {
+ 
+   page_id_t id(page_id.space(), ignored_page_no);
+ 
+-  ulint i = id.fold() % srv_buf_pool_instances;
++  ulint i;
++
++  ulint fold = id.fold();
++
++  if (srv_numa_aware) {
++    fil_space_t *space = fil_space_get(page_id.space());
++
++    if (space != nullptr && (space->numa_node & TABLESPACE_NUMA_ENABLE)) {
++      int numa_node = space->numa_node & TABLESPACE_NUMA_NODE;
++      int numa_offset = (space->numa_node & TABLESPACE_NUMA_REPLICATION) ? thread_numa_node : numa_node;
+ 
++      i = (fold % (srv_buf_pool_instances / numa_node_num)) * numa_node_num + numa_offset;
++
++      if (i >= srv_buf_pool_instances) {
++        i = fold % srv_buf_pool_instances;
++      }
++#ifdef HAVE_LIBNUMA
++      if (unlikely(numa_bind_flag == false)) {
++          struct bitmask *pnodemask = NULL;
++          char numa_node_string[16];
++          snprintf(numa_node_string, sizeof(numa_node_string), "%d", numa_node);
++          pnodemask = numa_parse_nodestring(numa_node_string);
++          if (numa_run_on_node_mask(pnodemask) == -1) {
++            std::cout << "agent thread bind failed" << std::endl;
++          }
++          numa_bind_flag = true;
++          thread_numa_node = numa_node;
++        }
++#endif
++    } else {
++      i = fold % srv_buf_pool_instances;
++    }
++  } else {
++    i = fold % srv_buf_pool_instances;
++  }
+   return (&buf_pool_ptr[i]);
+ }
+ 
+diff --git a/storage/innobase/include/dict0mem.h b/storage/innobase/include/dict0mem.h
+index a7f4edd..14fe9c3 100644
+--- a/storage/innobase/include/dict0mem.h
++++ b/storage/innobase/include/dict0mem.h
+@@ -1552,6 +1552,9 @@ struct dict_table_t {
+   /** Id of the table. */
+   table_id_t id;
+ 
++  /** Numa node of the table*/
++  uint8 numa_node;
++
+   /** Memory heap. If you allocate from this heap after the table has
+   been created then be sure to account the allocation into
+   dict_sys->size. When closing the table we do something like
+diff --git a/storage/innobase/include/fil0fil.h b/storage/innobase/include/fil0fil.h
+index fb2da70..e102911 100644
+--- a/storage/innobase/include/fil0fil.h
++++ b/storage/innobase/include/fil0fil.h
+@@ -225,6 +225,9 @@ struct fil_space_t {
+   /** Tablespace ID */
+   space_id_t id;
+ 
++  /** Tablespace numa node*/
++  uint8 numa_node;
++
+   /** true if we want to rename the .ibd file of tablespace and
+   want to stop temporarily posting of new i/o requests on the file */
+   bool stop_ios;
+diff --git a/storage/innobase/include/fsp0fsp.ic b/storage/innobase/include/fsp0fsp.ic
+index bd25ce5..81b64c9 100644
+--- a/storage/innobase/include/fsp0fsp.ic
++++ b/storage/innobase/include/fsp0fsp.ic
+@@ -379,7 +379,7 @@ inline bool fsp_flags_is_valid(uint32_t flags) {
+     return (false);
+   }
+ 
+-#if FSP_FLAGS_POS_UNUSED != 15
++#if FSP_FLAGS_POS_UNUSED != 23
+ #error You have added a new FSP_FLAG without adding a validation check.
+ #endif
+ 
+diff --git a/storage/innobase/include/fsp0space.h b/storage/innobase/include/fsp0space.h
+index cfb719b..c56694a 100644
+--- a/storage/innobase/include/fsp0space.h
++++ b/storage/innobase/include/fsp0space.h
+@@ -120,6 +120,16 @@ class Tablespace {
+   @return m_space_id space id of the tablespace */
+   space_id_t space_id() const { return (m_space_id); }
+ 
++  /** Set the numa node of the tablespace
++  @param[in]	numa_node	 tablespace numa node to set */
++  void set_numa_node(uint8 numa_node) {
++    m_numa_node = numa_node;
++  }
++
++  /** Get the numa node of the tablespace
++  @return m_numa_node numa node of the tablespace */
++  uint8 numa_node() const { return (m_numa_node); }
++
+   /** Set the tablespace flags
+   @param[in]	fsp_flags	tablespace flags */
+   void set_flags(uint32_t fsp_flags) {
+@@ -200,6 +210,9 @@ class Tablespace {
+   /** Tablespace ID */
+   space_id_t m_space_id;
+ 
++  /** Tablespace numa node */
++  uint8 m_numa_node;
++
+   /** Path where tablespace files will reside, not including a filename.*/
+   char *m_path;
+ 
+diff --git a/storage/innobase/include/fsp0types.h b/storage/innobase/include/fsp0types.h
+index 4a79910..0e2e7ba 100644
+--- a/storage/innobase/include/fsp0types.h
++++ b/storage/innobase/include/fsp0types.h
+@@ -254,6 +254,9 @@ is a tablespace with encryption. */
+ /** Width of the SDI flag.  This flag indicates the presence of
+ tablespace dictionary.*/
+ #define FSP_FLAGS_WIDTH_SDI 1
++/** Width of the numa node flag.  This flag indicates the numa attr of
++tablespace.*/
++#define FSP_FLAGS_WIDTH_NUMA_NODE 8
+ 
+ /** Width of all the currently known tablespace flags */
+ #define FSP_FLAGS_WIDTH                                        \
+@@ -261,7 +264,7 @@ tablespace dictionary.*/
+    FSP_FLAGS_WIDTH_ATOMIC_BLOBS + FSP_FLAGS_WIDTH_PAGE_SSIZE + \
+    FSP_FLAGS_WIDTH_DATA_DIR + FSP_FLAGS_WIDTH_SHARED +         \
+    FSP_FLAGS_WIDTH_TEMPORARY + FSP_FLAGS_WIDTH_ENCRYPTION +    \
+-   FSP_FLAGS_WIDTH_SDI)
++   FSP_FLAGS_WIDTH_SDI + FSP_FLAGS_WIDTH_NUMA_NODE)
+ 
+ /** A mask of all the known/used bits in tablespace flags */
+ #define FSP_FLAGS_MASK (~(~0U << FSP_FLAGS_WIDTH))
+@@ -290,9 +293,12 @@ tablespace dictionary.*/
+ /** Zero relative shift position of the start of the SDI bits */
+ #define FSP_FLAGS_POS_SDI \
+   (FSP_FLAGS_POS_ENCRYPTION + FSP_FLAGS_WIDTH_ENCRYPTION)
++/** Zero relative shift position of the start of the NUMA_NODE bits */
++#define FSP_FLAGS_POS_NUMA_NODE \
++  (FSP_FLAGS_POS_SDI + FSP_FLAGS_WIDTH_SDI)
+ 
+ /** Zero relative shift position of the start of the UNUSED bits */
+-#define FSP_FLAGS_POS_UNUSED (FSP_FLAGS_POS_SDI + FSP_FLAGS_WIDTH_SDI)
++#define FSP_FLAGS_POS_UNUSED (FSP_FLAGS_POS_NUMA_NODE + FSP_FLAGS_WIDTH_NUMA_NODE)
+ 
+ /** Bit mask of the POST_ANTELOPE field */
+ #define FSP_FLAGS_MASK_POST_ANTELOPE \
+@@ -321,6 +327,8 @@ tablespace dictionary.*/
+ /** Bit mask of the SDI field */
+ #define FSP_FLAGS_MASK_SDI \
+   ((~(~0U << FSP_FLAGS_WIDTH_SDI)) << FSP_FLAGS_POS_SDI)
++#define FSP_FLAGS_MASK_NUMA_NODE \
++  ((~(~0U << FSP_FLAGS_WIDTH_NUMA_NODE)) << FSP_FLAGS_POS_NUMA_NODE)
+ 
+ /** Return the value of the POST_ANTELOPE field */
+ #define FSP_FLAGS_GET_POST_ANTELOPE(flags) \
+@@ -349,6 +357,9 @@ tablespace dictionary.*/
+ /** Return the value of the SDI field */
+ #define FSP_FLAGS_HAS_SDI(flags) \
+   ((flags & FSP_FLAGS_MASK_SDI) >> FSP_FLAGS_POS_SDI)
++/** Return the value of the NUMA_NODE field */
++#define FSP_FLAGS_GET_NUMA_NODE(flags) \
++  ((flags & FSP_FLAGS_MASK_NUMA_NODE) >> FSP_FLAGS_POS_NUMA_NODE)
+ /** Return the contents of the UNUSED bits */
+ #define FSP_FLAGS_GET_UNUSED(flags) (flags >> FSP_FLAGS_POS_UNUSED)
+ /** Return true if flags are not set */
+@@ -374,6 +385,15 @@ UNIV_INLINE void fsp_flags_unset_sdi(uint32_t &flags) {
+   flags &= ~FSP_FLAGS_MASK_SDI;
+ }
+ 
++UNIV_INLINE void fsp_flags_set_numa_node(uint32_t &flags, uint8 numa_node) {
++  flags &= ~FSP_FLAGS_MASK_NUMA_NODE;
++  flags |= (numa_node << FSP_FLAGS_POS_NUMA_NODE);
++}
++
++UNIV_INLINE void fsp_flags_unset_numa_node(uint32_t &flags) {
++  flags &= ~FSP_FLAGS_MASK_NUMA_NODE;
++}
++
+ /** Use an alias in the code for FSP_FLAGS_GET_SHARED() */
+ #define fsp_is_shared_tablespace FSP_FLAGS_GET_SHARED
+ /* @} */
+@@ -392,4 +412,8 @@ of undo tablespace is always created and found in --innodb-undo-directory. */
+ #define FSP_IMPLICIT_UNDO_TABLESPACES 2
+ #define FSP_MAX_ROLLBACK_SEGMENTS (TRX_SYS_N_RSEGS)
+ 
++#define TABLESPACE_NUMA_NODE        (uint8)0xF
++#define TABLESPACE_NUMA_ENABLE      (uint8)0x10
++#define TABLESPACE_NUMA_REPLICATION (uint8)0x20
++
+ #endif /* fsp0types_h */
+diff --git a/storage/innobase/include/os0numa.h b/storage/innobase/include/os0numa.h
+index 79e705c..ba04955 100644
+--- a/storage/innobase/include/os0numa.h
++++ b/storage/innobase/include/os0numa.h
+@@ -228,4 +228,11 @@ inline int os_getcpu() {
+ }
+ #endif /* HAVE_SCHED_GETCPU || HAVE_WINNUMA */
+ 
++inline int os_numa_num_configured_nodes() {
++#if defined(HAVE_LIBNUMA)
++  return (numa_num_configured_nodes());
++#endif
++  return (1);
++}
++
+ #endif /* os0numa_h */
+diff --git a/storage/innobase/include/srv0srv.h b/storage/innobase/include/srv0srv.h
+index 738f486..cf79693 100644
+--- a/storage/innobase/include/srv0srv.h
++++ b/storage/innobase/include/srv0srv.h
+@@ -368,6 +368,8 @@ use simulated aio we build below with threads.
+ Currently we support native aio on windows and linux */
+ extern bool srv_use_native_aio;
+ extern bool srv_numa_interleave;
++extern bool srv_numa_aware;
++extern uint numa_node_num;
+ 
+ /* The innodb_directories variable value. This a list of directories
+ deliminated by ';', i.e the FIL_PATH_SEPARATOR. */
+diff --git a/storage/innobase/srv/srv0srv.cc b/storage/innobase/srv/srv0srv.cc
+index 9592955..ab80e63 100644
+--- a/storage/innobase/srv/srv0srv.cc
++++ b/storage/innobase/srv/srv0srv.cc
+@@ -202,6 +202,8 @@ bool srv_use_native_aio = TRUE; /* enabled by default on Windows */
+ bool srv_use_native_aio;
+ #endif
+ bool srv_numa_interleave = FALSE;
++bool srv_numa_aware = FALSE;
++uint numa_node_num = 0;
+ 
+ #ifdef UNIV_DEBUG
+ /** Force all user tables to use page compression. */
+-- 
+1.8.3.1
+
