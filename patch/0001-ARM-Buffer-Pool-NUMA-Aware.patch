@@ -1,5 +1,5 @@
 From e1dc31523500e92e0b9db3ca06174cf022f48b4a Mon Sep 17 00:00:00 2001
-From: xxx xxx
+From: zhuqi <zhuqi1@huawei.com>
 Date: Thu, 11 Jun 2020 15:47:20 +0800
 Subject: [PATCH] =?UTF-8?q?ARM=20Buffer=20Pool=20NUMA=20Aware=E4=BC=98?=
  =?UTF-8?q?=E5=8C=96?=
