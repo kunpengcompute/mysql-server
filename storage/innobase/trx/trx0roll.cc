@@ -620,13 +620,15 @@ static void trx_rollback_active(trx_t *trx) /*!< in/out: transaction */
   trx_roll_crash_recv_trx = nullptr;
 }
 
-static bool trx_rollback_or_clean_recovered_callback(rw_trx_hash_element_t *element,
-                                            std::vector<trx_t *> *trx_list) {
+static bool trx_rollback_or_clean_recovered_callback(
+    rw_trx_hash_element_t *element,
+    std::vector<trx_t *> *trx_list) {
   mutex_enter(&element->mutex);
   trx_t *trx = element->trx;
   if (trx != nullptr) {
     mutex_enter(&trx->mutex);
-    if (trx->is_recovered && (trx_state_eq(trx, TRX_STATE_ACTIVE) || trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY))) {
+    if (trx->is_recovered && (trx_state_eq(trx, TRX_STATE_ACTIVE) ||
+        trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY))) {
       ut_ad(trx != trx_dummy_sess->trx);
       trx_list->push_back(trx);
     }
@@ -662,7 +664,8 @@ void trx_rollback_or_clean_recovered(
 #ifdef UNIV_DEBUG
     ut_ad(trx != nullptr);
     trx_mutex_enter(trx);
-    ut_ad(trx->is_recovered && (trx_state_eq(trx, TRX_STATE_ACTIVE) || trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY)));
+    ut_ad(trx->is_recovered && (trx_state_eq(trx, TRX_STATE_ACTIVE) ||
+          trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY)));
     trx_mutex_exit(trx);
 #endif /* UNIV_DEBUG */
 
