@@ -114,6 +114,8 @@ class Shard_latch_guard {
 
   explicit Shard_latch_guard(const page_id_t &page_id)
       : m_global_shared_latch_guard{}, m_shard_naked_latch_guard{page_id} {}
+
+  ~Shard_latch_guard() {}
 };
 
 /**
