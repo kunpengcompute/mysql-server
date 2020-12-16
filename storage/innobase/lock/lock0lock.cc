@@ -366,9 +366,7 @@ void lock_sys_resize(ulint n_cells) {
   hash_table_free(old_hash);
 
   DBUG_EXECUTE_IF("syncpoint_after_lock_sys_resize_rec_hash", {
-    /* A workaround for buf_resize_thread() not using create_thd().
-    TBD: if buf_resize_thread() were to use create_thd() then should it be
-    instrumented (together or instead of os_thread_create instrumentation)? */
+    /* A workaround for buf_resize_thread() not using create_thd(). */
     ut_ad(current_thd == nullptr);
     THD *thd = create_thd(false, true, true, PSI_NOT_INSTRUMENTED);
     ut_ad(current_thd == thd);

@@ -160,8 +160,8 @@ class Shard_latches_guard {
  public:
   explicit Shard_latches_guard(const buf_block_t &block_a,
                                const buf_block_t &block_b)
-      : m_global_shared_latch_guard{},
-        m_shard_naked_latches_guard{block_a, block_b} {}
+    : m_global_shared_latch_guard{},
+      m_shard_naked_latches_guard{block_a, block_b} {}
 
   ~Shard_latches_guard() {}
 
@@ -169,7 +169,6 @@ class Shard_latches_guard {
   Global_shared_latch_guard m_global_shared_latch_guard;
   Shard_naked_latches_guard m_shard_naked_latches_guard;
 };
-
 }  // namespace locksys
 
 #endif /* lock0guards_h */
