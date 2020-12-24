@@ -1,0 +1,239 @@
+From 644bbc53a502ca3d16d0181009102cfe14140986 Mon Sep 17 00:00:00 2001
+From: zbluex <zbluex@gmail.com>
+Date: Thu, 11 Jun 2020 15:53:11 +0800
+Subject: [PATCH] =?UTF-8?q?MYSQL=20BINLOG=20CRC32=20ARM=E6=8C=87=E4=BB=A4?=
+ =?UTF-8?q?=E5=8A=A0=E9=80=9F=EF=BC=9BINNOBASE=20CRC32C=20ARM=E6=8C=87?=
+ =?UTF-8?q?=E4=BB=A4=E5=8A=A0=E9=80=9F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ mysys/checksum.cc            | 80 +++++++++++++++++++++++++++++++++++-
+ storage/innobase/ut/crc32.cc | 36 +++++++++++++++-
+ 2 files changed, 112 insertions(+), 4 deletions(-)
+
+diff --git a/mysys/checksum.cc b/mysys/checksum.cc
+index 44784317a10..eb841b88d5f 100644
+--- a/mysys/checksum.cc
++++ b/mysys/checksum.cc
+@@ -31,11 +31,84 @@
+ 
+ #include <stddef.h>
+ #include <sys/types.h>
+-#include <zlib.h>
+ 
+ #include "my_inttypes.h"
+ #include "my_sys.h"
+ 
++#if defined(__aarch64__)
++#include <arm_acle.h>
++#else
++#include <zlib.h>
++#endif
++#define POINTER_IS_ALIGNED(ptr, type) ((reinterpret_cast<uintptr_t>(buf) & (sizeof (type) - 1)) == 0)
++/*
++  Calculate a long checksum for a memoryblock by cpu instructions.
++
++  SYNOPSIS
++    crc32_hw()
++      crc       start value for crc
++      pos       pointer to memory block
++      length    length of the block
++  RETURN
++      crc32(polynomial 0x04C11DB7)
++*/
++#if defined(__aarch64__)
++MY_ATTRIBUTE((target("arch=armv8-a+crc")))
++static ha_checksum crc32_hw(ha_checksum crc, const uchar *buf, size_t len)
++{
++    if (buf == nullptr) return 0UL;
++    crc = crc ^ 0xffffffffUL;
++
++    /* calculate one byte crc32 result if the pointer of the buf is not aligned with half word */
++    if (!POINTER_IS_ALIGNED(buf, uint16_t) && len >= 1) {
++        crc = __crc32b(crc, *buf);
++        len -= 1;
++        buf += 1;
++    }
++
++    /* calculate half word crc32 result if the pointer of the buf is not aligned with word */
++    if (!POINTER_IS_ALIGNED(buf, uint32_t) && len >= 2) {
++        uint16_t *ptr = reinterpret_cast<uint16_t *>(const_cast<uchar *>(buf));
++        crc = __crc32h(crc, *ptr);
++        len -= 2;
++        buf += 2;
++    }
++
++    /* calculate word crc32 result if the pointer of the buf is not aligned with doulbe word */
++    if (!POINTER_IS_ALIGNED(buf, uint64_t) && len >= 4) {
++        uint32_t *ptr = reinterpret_cast<uint32_t *>(const_cast<uchar *>(buf));
++        crc = __crc32w(crc, *ptr);
++        len -= 4;
++        buf += 4;
++    }
++
++    /* use instruction to caclualte 8 bytes crc32 result every loop */
++    while (len >= 8) {
++        uint64_t *ptr = reinterpret_cast<uint64_t *>(const_cast<uchar *>(buf));
++        crc = __crc32d(crc, *ptr);
++        len -= 8;
++        buf += 8;
++    }
++
++    /* use instruction to caclualte 4 bytes crc32 result at once */
++    if (len >= 4) {
++        uint32_t *ptr = reinterpret_cast<uint32_t *>(const_cast<uchar *>(buf));
++        crc = __crc32w(crc, *ptr);
++        len -= 4;
++        buf += 4;
++    }
++
++    /* use instruction to caclualte 1 bytes crc32 result every loop*/
++    if (len) {
++        do {
++            crc = __crc32b(crc, *buf);
++            buf++;
++        } while (--len);
++    }
++    return crc ^ 0xffffffffUL;
++}
++#endif
++
+ /*
+   Calculate a long checksum for a memoryblock.
+ 
+@@ -45,7 +118,10 @@
+       pos       pointer to memory block
+       length    length of the block
+ */
+-
+ ha_checksum my_checksum(ha_checksum crc, const uchar *pos, size_t length) {
++#if defined(__aarch64__)
++  return (ha_checksum)crc32_hw((uint)crc, pos, (uint)length);
++#else
+   return (ha_checksum)crc32((uint)crc, pos, (uint)length);
++#endif
+ }
+diff --git a/storage/innobase/ut/crc32.cc b/storage/innobase/ut/crc32.cc
+index b0c55696878..3a897d16c00 100644
+--- a/storage/innobase/ut/crc32.cc
++++ b/storage/innobase/ut/crc32.cc
+@@ -99,6 +99,9 @@ external tools. */
+ #define gnuc64
+ #endif
+ 
++#if defined(__aarch64__)
++#include <arm_acle.h>
++#else
+ #if defined(gnuc64) || defined(_WIN32)
+ /*
+   GCC 4.8 can't include intrinsic headers without -msse4.2.
+@@ -121,6 +124,7 @@ ALWAYS_INLINE uint64_t _mm_crc32_u64(uint64_t __C, uint64_t __V) {
+ }
+ #endif
+ #endif  // defined(gnuc64) || defined(_WIN32)
++#endif  // defined(__aarch64__)
+ 
+ #include "univ.i"
+ #include "ut0crc32.h"
+@@ -155,7 +159,7 @@ bool ut_crc32_cpu_enabled = false;
+ #if defined(_WIN32)
+ #include <intrin.h>
+ #endif
+-#if defined(gnuc64) || defined(_WIN32)
++#if defined(gnuc64) || defined(_WIN32) || defined(__aarch64__)
+ /** Checks whether the CPU has the CRC32 instructions (part of the SSE4.2
+ instruction set).
+ @return true if CRC32 is available */
+@@ -180,6 +184,9 @@ static bool ut_crc32_check_cpu() {
+   return false;
+ #else
+ 
++#if defined(__aarch64__)
++  return true;
++#else
+   uint32_t features_ecx;
+ 
+ #if defined(gnuc64)
+@@ -201,6 +208,7 @@ static bool ut_crc32_check_cpu() {
+ #endif
+ 
+   return features_ecx & (1 << 20);  // SSE4.2
++#endif /* __aarch64__ */
+ #endif /* UNIV_DEBUG_VALGRIND */
+ }
+ 
+@@ -210,9 +218,17 @@ when the function ends it will contain the new checksum
+ @param[in,out]	data	data to be checksummed, the pointer will be advanced
+ with 1 byte
+ @param[in,out]	len	remaining bytes, it will be decremented with 1 */
++#if defined(__aarch64__)
++MY_ATTRIBUTE((target("arch=armv8-a+crc")))
++#else
+ MY_ATTRIBUTE((target("sse4.2")))
++#endif
+ inline void ut_crc32_8_hw(uint64_t *crc, const byte **data, ulint *len) {
++#if defined(__aarch64__)
++  *crc = __crc32cb(static_cast<unsigned>(*crc), (*data)[0]);
++#else
+   *crc = _mm_crc32_u8(static_cast<unsigned>(*crc), (*data)[0]);
++#endif
+   (*data)++;
+   (*len)--;
+ }
+@@ -221,10 +237,18 @@ inline void ut_crc32_8_hw(uint64_t *crc, const byte **data, ulint *len) {
+ @param[in]	crc	crc32 checksum so far
+ @param[in]	data	data to be checksummed
+ @return resulting checksum of crc + crc(data) */
++#if defined(__aarch64__)
++MY_ATTRIBUTE((target("arch=armv8-a+crc")))
++#else
+ MY_ATTRIBUTE((target("sse4.2")))
++#endif
+ inline uint64_t ut_crc32_64_low_hw(uint64_t crc, uint64_t data) {
+   uint64_t crc_64bit = crc;
++#if defined(__aarch64__)
++  crc_64bit = __crc32cd(crc_64bit, data);
++#else
+   crc_64bit = _mm_crc32_u64(crc_64bit, data);
++#endif
+   return (crc_64bit);
+ }
+ 
+@@ -234,7 +258,11 @@ when the function ends it will contain the new checksum
+ @param[in,out]	data	data to be checksummed, the pointer will be advanced
+ with 8 bytes
+ @param[in,out]	len	remaining bytes, it will be decremented with 8 */
++#if defined(__aarch64__)
++MY_ATTRIBUTE((target("arch=armv8-a+crc")))
++#else
+ MY_ATTRIBUTE((target("sse4.2")))
++#endif
+ inline void ut_crc32_64_hw(uint64_t *crc, const byte **data, ulint *len) {
+   uint64_t data_int = *reinterpret_cast<const uint64_t *>(*data);
+ 
+@@ -284,7 +312,11 @@ inline void ut_crc32_64_legacy_big_endian_hw(uint64_t *crc, const byte **data,
+ @param[in]	buf	data over which to calculate CRC32
+ @param[in]	len	data length
+ @return CRC-32C (polynomial 0x11EDC6F41) */
++#if defined(__aarch64__)
++MY_ATTRIBUTE((target("arch=armv8-a+crc")))
++#else
+ MY_ATTRIBUTE((target("sse4.2")))
++#endif
+ static uint32_t ut_crc32_hw(const byte *buf, ulint len) {
+   uint64_t crc = 0xFFFFFFFFU;
+ 
+@@ -660,7 +692,7 @@ static uint32_t ut_crc32_byte_by_byte_sw(const byte *buf, ulint len) {
+ /** Initializes the data structures used by ut_crc32*(). Does not do any
+  allocations, would not hurt if called twice, but would be pointless. */
+ void ut_crc32_init() {
+-#if defined(gnuc64) || defined(_WIN32)
++#if defined(gnuc64) || defined(_WIN32) || defined(__aarch64__)
+   ut_crc32_cpu_enabled = ut_crc32_check_cpu();
+ 
+   if (ut_crc32_cpu_enabled) {
+-- 
+2.28.0.windows.1
+
