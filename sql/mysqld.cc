@@ -614,6 +614,7 @@ The documentation is based on the source files such as:
 #include "sql/binlog.h"     // mysql_bin_log
 #include "sql/bootstrap.h"  // bootstrap
 #include "sql/check_stack.h"
+#include "sql/sched_affinity_manager.h"
 #include "sql/conn_handler/connection_acceptor.h"  // Connection_acceptor
 #include "sql/conn_handler/connection_handler_impl.h"  // Per_thread_connection_handler
 #include "sql/conn_handler/connection_handler_manager.h"  // Connection_handler_manager
@@ -1018,6 +1019,7 @@ ulong opt_keyring_migration_port = 0;
 bool migrate_connect_options = false;
 uint host_cache_size;
 ulong log_error_verbosity = 3;  // have a non-zero value during early start-up
+extern std::map<sched_affinity::Thread_type, char*> sched_affinity_parameter;
 
 #if defined(_WIN32)
 /*
@@ -2384,6 +2386,7 @@ static void clean_up(bool print_message) {
   */
   sys_var_end();
   free_status_vars();
+  sched_affinity::Sched_affinity_manager::free_instance();
 
   if (have_statement_timeout == SHOW_OPTION_YES) my_timer_deinitialize();
 
@@ -6682,6 +6685,11 @@ int mysqld_main(int argc, char **argv)
   /* Determine default TCP port and unix socket name */
   set_ports();
 
+  if (sched_affinity::Sched_affinity_manager::create_instance(sched_affinity_parameter) == nullptr) {
+    LogErr(ERROR_LEVEL, ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER);
+    unireg_abort(MYSQLD_ABORT_EXIT);
+  }
+
   if (init_server_components()) unireg_abort(MYSQLD_ABORT_EXIT);
 
   if (!server_id_supplied)
@@ -8197,6 +8205,30 @@ static int show_queries(THD *thd, SHOW_VAR *var, char *) {
   return 0;
 }
 
+static int show_sched_affinity_status(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_CHAR;
+  var->value = buff;
+  sched_affinity::Sched_affinity_manager::get_instance()->take_snapshot(
+      buff, SHOW_VAR_FUNC_BUFF_SIZE + 1);
+  return 0;
+}
+
+static int show_sched_affinity_group_number(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_SIGNED_INT;
+  var->value = buff;
+  *(reinterpret_cast<int32 *>(buff)) = sched_affinity::Sched_affinity_manager::get_instance()
+                             ->get_total_node_number();                    
+  return 0;
+}
+
+static int show_sched_affinity_group_capacity(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_SIGNED_INT;
+  var->value = buff;
+  *(reinterpret_cast<int32 *>(buff)) = sched_affinity::Sched_affinity_manager::get_instance()
+                             ->get_cpu_number_per_node();
+  return 0;
+}
+
 static int show_net_compression(THD *thd, SHOW_VAR *var, char *buff) {
   var->type = SHOW_MY_BOOL;
   var->value = buff;
@@ -8780,6 +8812,9 @@ SHOW_VAR status_vars[] = {
     {"Queries", (char *)&show_queries, SHOW_FUNC, SHOW_SCOPE_ALL},
     {"Questions", (char *)offsetof(System_status_var, questions),
      SHOW_LONGLONG_STATUS, SHOW_SCOPE_ALL},
+    {"Sched_affinity_status", (char *)&show_sched_affinity_status, SHOW_FUNC, SHOW_SCOPE_ALL},
+    {"Sched_affinity_group_number", (char *)&show_sched_affinity_group_number, SHOW_FUNC, SHOW_SCOPE_ALL},
+    {"Sched_affinity_group_capacity", (char *)&show_sched_affinity_group_capacity, SHOW_FUNC, SHOW_SCOPE_ALL},
     {"Secondary_engine_execution_count",
      (char *)offsetof(System_status_var, secondary_engine_execution_count),
      SHOW_LONGLONG_STATUS, SHOW_SCOPE_ALL},
@@ -10584,6 +10619,7 @@ PSI_mutex_key key_mts_gaq_LOCK;
 PSI_mutex_key key_thd_timer_mutex;
 PSI_mutex_key key_commit_order_manager_mutex;
 PSI_mutex_key key_mutex_slave_worker_hash;
+PSI_mutex_key key_sched_affinity_mutex;
 
 /* clang-format off */
 static PSI_mutex_info all_server_mutexes[]=
@@ -10671,7 +10707,8 @@ static PSI_mutex_info all_server_mutexes[]=
   { &key_LOCK_password_reuse_interval, "LOCK_password_reuse_interval", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_LOCK_keyring_operations, "LOCK_keyring_operations", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_LOCK_tls_ctx_options, "LOCK_tls_ctx_options", 0, 0, "A lock to control all of the --ssl-* CTX related command line options"},
-  { &key_LOCK_rotate_binlog_master_key, "LOCK_rotate_binlog_master_key", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME}
+  { &key_LOCK_rotate_binlog_master_key, "LOCK_rotate_binlog_master_key", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
+  { &key_sched_affinity_mutex, "Sched_affinity::m_mutex", 0, 0, PSI_DOCUMENT_ME}
 };
 /* clang-format on */
 

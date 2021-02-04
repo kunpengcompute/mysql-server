@@ -246,6 +246,7 @@ SET(SERVER_TESTS
   protocol_classic
   regexp_engine
   regexp_facade
+  sched_affinity_manager
   security_context
   segfault
   select_lex_visitor

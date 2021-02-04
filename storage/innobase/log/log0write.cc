@@ -69,6 +69,7 @@ the file COPYING.Google.
 #include "trx0roll.h"
 #include "trx0sys.h"
 #include "trx0trx.h"
+#include "sql/sched_affinity_manager.h"
 
 /**************************************************/ /**
  @page PAGE_INNODB_REDO_LOG_THREADS Background redo log threads
@@ -1964,6 +1965,13 @@ static void log_writer_write_buffer(log_t &log, lsn_t next_write_lsn) {
 }
 
 void log_writer(log_t *log_ptr) {
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_writer");
+    }
+  }
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2202,6 +2210,13 @@ static void log_flush_low(log_t &log) {
 }
 
 void log_flusher(log_t *log_ptr) {
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSHER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_flusher");
+    }
+  }
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2330,6 +2345,13 @@ void log_flusher(log_t *log_ptr) {
 /* @{ */
 
 void log_write_notifier(log_t *log_ptr) {
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_write_notifier");
+    }
+  }
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2429,6 +2451,13 @@ void log_write_notifier(log_t *log_ptr) {
 /* @{ */
 
 void log_flush_notifier(log_t *log_ptr) {
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_flush_notifier");
+    }
+  }
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2528,6 +2557,13 @@ void log_flush_notifier(log_t *log_ptr) {
 /* @{ */
 
 void log_closer(log_t *log_ptr) {
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_CLOSER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_closer");
+    }
+  }
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
