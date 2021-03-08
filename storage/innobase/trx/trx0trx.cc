@@ -253,6 +253,8 @@ struct TrxFactory {
 
     new (&trx->lock.table_locks) lock_pool_t();
 
+    trx->rw_trx_hash_pins = nullptr;
+
     trx_init(trx);
 
     trx->state = TRX_STATE_NOT_STARTED;
@@ -448,6 +450,7 @@ static trx_t *trx_create_low() {
 
   /* We just got trx from pool, it should be non locking */
   ut_ad(trx->will_lock == 0);
+  ut_ad(!trx->rw_trx_hash_pins);
 
   trx->persists_gtid = false;
 
@@ -485,6 +488,7 @@ Release a trx_t instance back to the pool.
 static void trx_free(trx_t *&trx) {
   assert_trx_is_free(trx);
 
+  trx_sys->rw_trx_hash.put_pins(trx);
   trx->mysql_thd = nullptr;
 
   // FIXME: We need to avoid this heap free/alloc for each commit.
@@ -675,7 +679,10 @@ static void trx_resurrect_table_ids(trx_t *trx, const trx_undo_ptr_t *undo_ptr,
 
   ut_ad(undo == undo_ptr->insert_undo || undo == undo_ptr->update_undo);
 
-  if (trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY) || undo->empty) {
+  ut_ad(trx_state_eq(trx, TRX_STATE_ACTIVE) ||
+        trx_state_eq(trx, TRX_STATE_PREPARED));
+
+  if (undo->empty) {
     return;
   }
 
@@ -937,10 +944,32 @@ static void trx_resurrect_update(
   }
 }
 
+/** Mapping read-write transactions from id to transaction instance, for
+creating read views and during trx id lookup for MVCC and locking. */
+struct TrxTrack {
+  explicit TrxTrack(trx_id_t id, trx_t *trx = nullptr) : m_id(id), m_trx(trx) {
+    // Do nothing
+  }
+
+  trx_id_t m_id;
+  trx_t *m_trx;
+};
+
+/**
+Comparator for TrxMap */
+struct TrxTrackCmp {
+  bool operator()(const TrxTrack &lhs, const TrxTrack &rhs) const {
+    return (lhs.m_id < rhs.m_id);
+  }
+};
+
+// typedef std::unordered_set<TrxTrack, TrxTrackHash, TrxTrackHashCmp> TrxIdSet;
+typedef std::set<TrxTrack, TrxTrackCmp, ut_allocator<TrxTrack>> TrxIdSet;
+
 /** Resurrect the transactions that were doing inserts and updates at
 the time of a crash, they need to be undone.
 @param[in]	rseg	rollback segment */
-static void trx_resurrect(trx_rseg_t *rseg) {
+static void trx_resurrect(trx_rseg_t *rseg, TrxIdSet& set) {
   trx_t *trx;
   trx_undo_t *undo;
 
@@ -951,7 +980,8 @@ static void trx_resurrect(trx_rseg_t *rseg) {
        undo = UT_LIST_GET_NEXT(undo_list, undo)) {
     trx = trx_resurrect_insert(undo, rseg);
 
-    trx_sys_rw_trx_add(trx);
+    set.insert(TrxTrack(trx->id, trx));
+    ut_d(trx->in_rw_trx_list = true);
 
     trx_resurrect_table_ids(trx, &trx->rsegs.m_redo, undo);
   }
@@ -959,12 +989,9 @@ static void trx_resurrect(trx_rseg_t *rseg) {
   /* Ressurrect transactions that were doing updates. */
   for (undo = UT_LIST_GET_FIRST(rseg->update_undo_list); undo != nullptr;
        undo = UT_LIST_GET_NEXT(undo_list, undo)) {
-    /* Check the trx_sys->rw_trx_set first. */
-    trx_sys_mutex_enter();
-
-    trx_t *trx = trx_get_rw_trx_by_id(undo->trx_id);
-
-    trx_sys_mutex_exit();
+    /* Check if trx_id was already registered first. */
+    TrxIdSet::iterator it = set.find(TrxTrack(undo->trx_id));
+    trx_t *trx = it == set.end() ? 0 : it->m_trx;
 
     if (trx == nullptr) {
       trx = trx_allocate_for_background();
@@ -975,7 +1002,8 @@ static void trx_resurrect(trx_rseg_t *rseg) {
 
     trx_resurrect_update(trx, undo, rseg);
 
-    trx_sys_rw_trx_add(trx);
+    set.insert(TrxTrack(trx->id, trx));
+    ut_d(trx->in_rw_trx_list = true);
 
     trx_resurrect_table_ids(trx, &trx->rsegs.m_redo, undo);
   }
@@ -987,12 +1015,13 @@ static void trx_resurrect(trx_rseg_t *rseg) {
  transactions to be rolled back or cleaned up are built based on the
  undo log lists. */
 void trx_lists_init_at_db_start(void) {
+  TrxIdSet set;
   ut_a(srv_is_being_started);
 
   /* Look through the rollback segments in the TRX_SYS for
   transaction undo logs. */
   for (auto rseg : trx_sys->rsegs) {
-    trx_resurrect(rseg);
+    trx_resurrect(rseg, set);
   }
 
   /* Look through the rollback segments in each RSEG_ARRAY for
@@ -1001,20 +1030,24 @@ void trx_lists_init_at_db_start(void) {
   for (auto undo_space : undo::spaces->m_spaces) {
     undo_space->rsegs()->s_lock();
     for (auto rseg : *undo_space->rsegs()) {
-      trx_resurrect(rseg);
+      trx_resurrect(rseg, set);
     }
     undo_space->rsegs()->s_unlock();
   }
   undo::spaces->s_unlock();
 
-  TrxIdSet::iterator end = trx_sys->rw_trx_set.end();
+  TrxIdSet::iterator end = set.end();
 
-  for (TrxIdSet::iterator it = trx_sys->rw_trx_set.begin(); it != end; ++it) {
+  for (TrxIdSet::iterator it = set.begin(); it != end; ++it) {
     ut_ad(it->m_trx->in_rw_trx_list);
 
-    if (it->m_trx->state == TRX_STATE_ACTIVE ||
-        it->m_trx->state == TRX_STATE_PREPARED) {
-      trx_sys->rw_trx_ids.push_back(it->m_id);
+    auto trx = it->m_trx;
+    if (trx_state_eq(trx, TRX_STATE_ACTIVE) ||
+        trx_state_eq(trx, TRX_STATE_PREPARED))
+    {
+      trx_sys->rw_trx_hash.insert(trx);
+      trx_sys->rw_trx_hash.put_pins(trx);
+      trx_sys->rw_trx_ids.push_back(trx->id);
     }
 
     UT_LIST_ADD_FIRST(trx_sys->rw_trx_list, it->m_trx);
@@ -1192,9 +1225,9 @@ void trx_assign_rseg_temp(trx_t *trx) {
 
     trx_sys->rw_trx_ids.push_back(trx->id);
 
-    trx_sys->rw_trx_set.insert(TrxTrack(trx->id, trx));
-
     mutex_exit(&trx_sys->mutex);
+
+    trx_sys->rw_trx_hash.insert(trx);
   }
 }
 
@@ -1264,10 +1297,14 @@ static void trx_start_low(
 
   ut_ad(!trx->in_rw_trx_list);
 
-  /* We tend to over assert and that complicates the code somewhat.
-  e.g., the transaction state can be set earlier but we are forced to
-  set it under the protection of the trx_sys_t::mutex because some
-  trx list assertions are triggered unnecessarily. */
+	/* No other thread can access this trx object through rw_trx_hash, thus
+	we don't need trx_sys->mutex protection for that purpose. Still this
+	trx can be found through trx_sys->mysql_trx_list, which means state
+	change must be protected by e.g. trx->mutex.
+
+	For now we update it without mutex protection, because original code
+	did it this way. It has to be reviewed and fixed properly. */
+	trx->state = TRX_STATE_ACTIVE;
 
   /* By default all transactions are in the read-only list unless they
   are non-locking auto-commit read only transactions or background
@@ -1288,8 +1325,6 @@ static void trx_start_low(
 
     trx_sys->rw_trx_ids.push_back(trx->id);
 
-    trx_sys_rw_trx_add(trx);
-
     ut_ad(trx->rsegs.m_redo.rseg != nullptr || srv_read_only_mode ||
           srv_force_recovery >= SRV_FORCE_NO_TRX_UNDO);
 
@@ -1297,12 +1332,11 @@ static void trx_start_low(
 
     ut_d(trx->in_rw_trx_list = true);
 
-    trx->state = TRX_STATE_ACTIVE;
-
     ut_ad(trx_sys_validate_trx_list());
 
     trx_sys_mutex_exit();
 
+    trx_sys->rw_trx_hash.insert(trx);
   } else {
     trx->id = 0;
 
@@ -1320,16 +1354,12 @@ static void trx_start_low(
 
         trx_sys->rw_trx_ids.push_back(trx->id);
 
-        trx_sys->rw_trx_set.insert(TrxTrack(trx->id, trx));
-
         trx_sys_mutex_exit();
+
+        trx_sys->rw_trx_hash.insert(trx);
       }
-
-      trx->state = TRX_STATE_ACTIVE;
-
     } else {
       ut_ad(!read_write);
-      trx->state = TRX_STATE_ACTIVE;
     }
   }
 
@@ -1733,8 +1763,6 @@ static void trx_erase_lists(trx_t *trx, bool serialised, Gtid_desc &gtid_desc) {
     }
   }
 
-  trx_sys->rw_trx_set.erase(TrxTrack(trx->id));
-
   /* Set minimal active trx id. */
   trx_id_t min_id = trx_sys->rw_trx_ids.empty() ? trx_sys->max_trx_id
                                                 : trx_sys->rw_trx_ids.front();
@@ -1771,30 +1799,26 @@ static void trx_release_impl_and_expl_locks(trx_t *trx, bool serialized) {
     --trx_sys->n_prepared_trx;
   }
 
-  trx_mutex_enter(trx);
-  /* Please consider this particular point in time as the moment the trx's
-  implicit locks become released.
-  This change is protected by both trx_sys->mutex and trx->mutex.
-  Therefore, there are two secure ways to check if the trx still can hold
-  implicit locks:
-  (1) if you only know id of the trx, then you can obtain trx_sys->mutex and
-      check if trx is still in rw_trx_set. This works, because the call to
-      trx_erase_list() which removes trx from this list several lines above is
-      also protected by trx_sys->mutex. We use this approach in
-      lock_rec_convert_impl_to_expl() by using trx_rw_is_active()
-  (2) if you have pointer to trx, and you know it is safe to access (say, you
-      hold reference to this trx which prevents it from being freed) then you
-      can obtain trx->mutex and check if trx->state is equal to
-      TRX_STATE_COMMITTED_IN_MEMORY. We use this approach in
-      lock_rec_convert_impl_to_expl_for_trx() when deciding for the final time
-      if we really want to create explicit lock on behalf of implicit lock
-      holder. */
-  trx->state = TRX_STATE_COMMITTED_IN_MEMORY;
-  trx_mutex_exit(trx);
-
   if (trx_sys_latch_is_needed) {
     trx_sys_mutex_exit();
   }
+
+  if (trx->id > 0) {
+    trx_sys->rw_trx_hash.erase(trx);
+  }
+
+  trx_mutex_enter(trx);
+  /* Please consider this particular point in time as the moment the trx's
+  implicit locks become released.
+  if you have pointer to trx, and you know it is safe to access (say, you
+  hold reference to this trx which prevents it from being freed) then you
+  can obtain trx->mutex and check if trx->state is equal to
+  TRX_STATE_COMMITTED_IN_MEMORY. We use this approach in
+  lock_rec_convert_impl_to_expl_for_trx() when deciding for the final time
+  if we really want to create explicit lock on behalf of implicit lock
+  holder. */
+  trx->state = TRX_STATE_COMMITTED_IN_MEMORY;
+  trx_mutex_exit(trx);
 
   lock_trx_release_locks(trx);
 }
@@ -3184,8 +3208,6 @@ void trx_set_rw_mode(trx_t *trx) /*!< in/out: transaction that is RW */
 
   trx_sys->rw_trx_ids.push_back(trx->id);
 
-  trx_sys->rw_trx_set.insert(TrxTrack(trx->id, trx));
-
   /* So that we can see our own changes. */
   if (MVCC::is_view_active(trx->read_view)) {
     MVCC::set_view_creator_trx_id(trx->read_view, trx->id);
@@ -3196,6 +3218,8 @@ void trx_set_rw_mode(trx_t *trx) /*!< in/out: transaction that is RW */
   ut_d(trx->in_rw_trx_list = true);
 
   mutex_exit(&trx_sys->mutex);
+
+  trx_sys->rw_trx_hash.insert(trx);
 }
 
 void trx_kill_blocking(trx_t *trx) {

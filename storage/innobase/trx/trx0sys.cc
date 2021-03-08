@@ -520,7 +520,7 @@ void trx_sys_create(void) {
   new (&trx_sys->rw_trx_ids)
       trx_ids_t(ut_allocator<trx_id_t>(mem_key_trx_sys_t_rw_trx_ids));
 
-  new (&trx_sys->rw_trx_set) TrxIdSet();
+  trx_sys->rw_trx_hash.init();
 
   new (&trx_sys->rsegs) Rsegs();
   trx_sys->rsegs.set_empty();
@@ -586,7 +586,7 @@ void trx_sys_close(void) {
 
   trx_sys->rw_trx_ids.~trx_ids_t();
 
-  trx_sys->rw_trx_set.~TrxIdSet();
+  trx_sys->rw_trx_hash.destroy();
 
   ut_free(trx_sys);
 

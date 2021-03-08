@@ -179,22 +179,6 @@ trx_id_t trx_read_trx_id(
   return (mach_read_from_6(ptr));
 }
 
-UNIV_INLINE
-trx_t *trx_get_rw_trx_by_id(trx_id_t trx_id) {
-  ut_ad(trx_id > 0);
-  ut_ad(trx_sys_mutex_own());
-
-  if (trx_sys->rw_trx_set.empty()) {
-    return (nullptr);
-  }
-
-  TrxIdSet::iterator it;
-
-  it = trx_sys->rw_trx_set.find(TrxTrack(trx_id));
-
-  return (it == trx_sys->rw_trx_set.end() ? nullptr : it->m_trx);
-}
-
 /** Returns the minimum trx id in trx list. This is the smallest id for which
  the trx can possibly be active. (But, you must look at the trx->state
  to find out if the minimum trx id transaction itself is active, or already
@@ -218,25 +202,6 @@ trx_id_t trx_rw_min_trx_id_low(void) {
   return (id);
 }
 
-#if defined UNIV_DEBUG || defined UNIV_BLOB_LIGHT_DEBUG
-/** Assert that a transaction has been recovered.
- @return true */
-UNIV_INLINE
-ibool trx_assert_recovered(trx_id_t trx_id) /*!< in: transaction identifier */
-{
-  const trx_t *trx;
-
-  trx_sys_mutex_enter();
-
-  trx = trx_get_rw_trx_by_id(trx_id);
-  ut_a(trx->is_recovered);
-
-  trx_sys_mutex_exit();
-
-  return (TRUE);
-}
-#endif /* UNIV_DEBUG || UNIV_BLOB_LIGHT_DEBUG */
-
 /** Returns the minimum trx id in rw trx list. This is the smallest id for which
  the rw trx can possibly be active. (But, you must look at the trx->state
  to find out if the minimum trx id transaction itself is active, or already
@@ -251,57 +216,6 @@ trx_id_t trx_rw_min_trx_id(void) {
   trx_sys_mutex_exit();
 
   return (id);
-}
-
-UNIV_INLINE
-trx_t *trx_rw_is_active_low(trx_id_t trx_id, ibool *corrupt) {
-  trx_t *trx;
-
-  ut_ad(trx_sys_mutex_own());
-
-  if (trx_id < trx_rw_min_trx_id_low()) {
-    trx = nullptr;
-  } else if (trx_id >= trx_sys->max_trx_id) {
-    /* There must be corruption: we let the caller handle the
-    diagnostic prints in this case. */
-
-    trx = nullptr;
-    if (corrupt != nullptr) {
-      *corrupt = TRUE;
-    }
-  } else {
-    trx = trx_get_rw_trx_by_id(trx_id);
-    /* We remove trx from rw trxs list and change state to
-    TRX_STATE_COMMITTED_IN_MEMORY in a same critical section protected by
-    trx_sys->mutex, which we happen to hold here, so we expect the state of trx
-    to match its presence in that list */
-    ut_ad(trx == nullptr || !trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY));
-  }
-
-  return (trx);
-}
-
-UNIV_INLINE
-trx_t *trx_rw_is_active(trx_id_t trx_id, ibool *corrupt, bool do_ref_count) {
-  trx_t *trx;
-
-  /* Fast checking. If it's smaller than minimal active trx id, just
-  return NULL. */
-  if (trx_sys->min_active_id.load() > trx_id) {
-    return (nullptr);
-  }
-
-  trx_sys_mutex_enter();
-
-  trx = trx_rw_is_active_low(trx_id, corrupt);
-
-  if (trx != nullptr) {
-    trx = trx_reference(trx, do_ref_count);
-  }
-
-  trx_sys_mutex_exit();
-
-  return (trx);
 }
 
 /** Allocates a new transaction id.
@@ -361,17 +275,6 @@ bool trx_sys_need_rollback() {
   trx_sys_mutex_exit();
 
   return (n_trx > 0);
-}
-
-/**
-Add the transaction to the RW transaction set
-@param trx		transaction instance to add */
-UNIV_INLINE
-void trx_sys_rw_trx_add(trx_t *trx) {
-  ut_ad(trx->id != 0);
-
-  trx_sys->rw_trx_set.insert(TrxTrack(trx->id, trx));
-  ut_d(trx->in_rw_trx_list = true);
 }
 
 #endif /* !UNIV_HOTBACKUP */

@@ -652,6 +652,7 @@ static PSI_mutex_info all_innodb_mutexes[] = {
 #endif /* UNIV_DEBUG */
     PSI_MUTEX_KEY(rw_lock_list_mutex, 0, 0, PSI_DOCUMENT_ME),
     PSI_MUTEX_KEY(rw_lock_mutex, 0, 0, PSI_DOCUMENT_ME),
+    PSI_MUTEX_KEY(rw_trx_hash_element_mutex, 0, 0, PSI_DOCUMENT_ME),
     PSI_MUTEX_KEY(srv_innodb_monitor_mutex, 0, 0, PSI_DOCUMENT_ME),
     PSI_MUTEX_KEY(srv_misc_tmpfile_mutex, 0, 0, PSI_DOCUMENT_ME),
     PSI_MUTEX_KEY(srv_monitor_file_mutex, 0, 0, PSI_DOCUMENT_ME),
@@ -19320,6 +19321,22 @@ debug_set:
   }
 
   return true;
+}
+
+/**
+  Gets current trx.
+
+  This function may be called during InnoDB initialisation, when
+  innodb_hton_ptr->slot is not yet set to meaningful value.
+*/
+trx_t *current_trx() {
+  THD *thd = current_thd;
+  if (likely(thd != 0) && innodb_hton_ptr->slot != HA_SLOT_UNDEF) {
+    trx_t *&trx = thd_to_trx(thd);
+    return (trx);
+  } else {
+    return (NULL);
+  }
 }
 
 /** Update the system variable innodb_buffer_pool_size using the "saved"
