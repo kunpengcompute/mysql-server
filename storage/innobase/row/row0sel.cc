@@ -752,9 +752,9 @@ static void row_sel_build_committed_vers_for_mysql(
     prebuilt->old_vers_heap = mem_heap_create(rec_offs_size(*offsets));
   }
 
-  row_vers_build_for_semi_consistent_read(rec, mtr, clust_index, offsets,
-                                          offset_heap, prebuilt->old_vers_heap,
-                                          old_vers, vrow);
+  row_vers_build_for_semi_consistent_read(
+      prebuilt->trx, rec, mtr, clust_index, offsets, offset_heap,
+      prebuilt->old_vers_heap, old_vers, vrow);
 }
 
 /** Tests the conditions which determine when the index segment we are searching
