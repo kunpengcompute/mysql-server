@@ -28,19 +28,19 @@ enum class Thread_type {
 class Sched_affinity_manager {
  public:
   static Sched_affinity_manager *create_instance(
-      const std::map<Thread_type, char *> &);
+      const std::map<Thread_type, const char *> &);
   static Sched_affinity_manager *get_instance();
   static void free_instance();
 
-  virtual bool dynamic_bind(int &) = 0;
-  virtual bool dynamic_unbind(const int &) = 0;
-  virtual bool static_bind(const Thread_type &) = 0;
+  virtual bool bind_to_group(int &) = 0;
+  virtual bool unbind_from_group(const int &) = 0;
+  virtual bool bind_to_target(const Thread_type &) = 0;
   virtual void take_snapshot(char *buff, int buff_size) = 0;
   virtual int get_total_node_number() = 0;
   virtual int get_cpu_number_per_node() = 0;
 
  protected:
-  virtual bool init(const std::map<Thread_type, char *> &) = 0;
+  virtual bool init(const std::map<Thread_type, const char *> &) = 0;
   virtual ~Sched_affinity_manager() {}
 };
 
@@ -53,9 +53,9 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   Sched_affinity_manager_dummy &operator=(
       const Sched_affinity_manager_dummy &&) = delete;
 
-  bool dynamic_bind(int &) override { return true; }
-  bool dynamic_unbind(const int &) override { return true; }
-  bool static_bind(const Thread_type &) override { return true; }
+  bool bind_to_group(int &) override { return true; }
+  bool unbind_from_group(const int &) override { return true; }
+  bool bind_to_target(const Thread_type &) override { return true; }
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override { return -1; }
   int get_cpu_number_per_node() override { return -1; }
@@ -63,7 +63,7 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
  private:
   Sched_affinity_manager_dummy() : Sched_affinity_manager(){};
   ~Sched_affinity_manager_dummy(){};
-  bool init(const std::map<Thread_type, char *> &) override { return true; }
+  bool init(const std::map<Thread_type, const char *> &) override { return true; }
   friend class Sched_affinity_manager;
 };
 
@@ -84,9 +84,9 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   Sched_affinity_manager_numa &operator=(const Sched_affinity_manager_numa &&) =
       delete;
 
-  bool dynamic_bind(int &) override;
-  bool dynamic_unbind(const int &) override;
-  bool static_bind(const Thread_type &) override;
+  bool bind_to_group(int &) override;
+  bool unbind_from_group(const int &) override;
+  bool bind_to_target(const Thread_type &) override;
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override;
   int get_cpu_number_per_node() override;
@@ -94,8 +94,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
  private:
   Sched_affinity_manager_numa();
   ~Sched_affinity_manager_numa();
-  bool init(const std::map<Thread_type, char *> &) override;
-  bool init_sched_affinity_info(const std::map<Thread_type, char *> &);
+  bool init(const std::map<Thread_type, const char *> &) override;
+  bool init_sched_affinity_info(const std::map<Thread_type, const char *> &);
   bool init_sched_affinity_group();
   bool check_foreground_background_compatibility(bitmask *bm_foreground,
                                                  bitmask *bm_background);

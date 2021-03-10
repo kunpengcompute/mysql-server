@@ -5,10 +5,6 @@
 #include "sql/mysqld.h"
 
 #ifdef HAVE_LIBNUMA
-#include <cstdio>
-#endif /* HAVE_LIBNUMA */
-
-#ifdef HAVE_LIBNUMA
 namespace sched_affinity {
 
 const Thread_type thread_types[] = {
@@ -67,7 +63,7 @@ Sched_affinity_manager_numa::~Sched_affinity_manager_numa() {
 }
 
 bool Sched_affinity_manager_numa::init(
-    const std::map<Thread_type, char *> &sched_affinity_parameter) {
+    const std::map<Thread_type, const char *> &sched_affinity_parameter) {
   if (!init_sched_affinity_info(sched_affinity_parameter)) {
     return false;
   }
@@ -78,7 +74,7 @@ bool Sched_affinity_manager_numa::init(
 }
 
 bool Sched_affinity_manager_numa::init_sched_affinity_info(
-    const std::map<Thread_type, char *> &sched_affinity_parameter) {
+    const std::map<Thread_type, const char *> &sched_affinity_parameter) {
   m_total_cpu_num = numa_num_configured_cpus();
   m_total_node_num = numa_num_configured_nodes();
   m_cpu_num_per_node = m_total_cpu_num / m_total_node_num;
@@ -167,7 +163,7 @@ bool Sched_affinity_manager_numa::check_thread_process_compatibility(
   return true;
 }
 
-bool Sched_affinity_manager_numa::dynamic_bind(int &out) {
+bool Sched_affinity_manager_numa::bind_to_group(int &out) {
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     out = -1;
     return true;
@@ -205,7 +201,7 @@ bool Sched_affinity_manager_numa::dynamic_bind(int &out) {
   }
 }
 
-bool Sched_affinity_manager_numa::dynamic_unbind(const int &index) {
+bool Sched_affinity_manager_numa::unbind_from_group(const int &index) {
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     return true;
   }
@@ -221,7 +217,7 @@ bool Sched_affinity_manager_numa::dynamic_unbind(const int &index) {
   }
 }
 
-bool Sched_affinity_manager_numa::static_bind(const Thread_type &thread_type) {
+bool Sched_affinity_manager_numa::bind_to_target(const Thread_type &thread_type) {
   if (thread_type == Thread_type::FOREGROUND) {
     return false;
   }
@@ -271,7 +267,7 @@ void Sched_affinity_manager_dummy::take_snapshot(char *buff, int buff_size) {
 static Sched_affinity_manager *sched_affinity_manager = nullptr;
 
 Sched_affinity_manager *Sched_affinity_manager::create_instance(
-    const std::map<Thread_type, char *> &sched_affinity_parameter) {
+    const std::map<Thread_type, const char *> &sched_affinity_parameter) {
   Sched_affinity_manager::free_instance();
 #ifdef HAVE_LIBNUMA
   if (numa_available() == -1) {

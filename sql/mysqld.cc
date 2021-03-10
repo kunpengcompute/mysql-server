@@ -1019,7 +1019,7 @@ ulong opt_keyring_migration_port = 0;
 bool migrate_connect_options = false;
 uint host_cache_size;
 ulong log_error_verbosity = 3;  // have a non-zero value during early start-up
-extern std::map<sched_affinity::Thread_type, char*> sched_affinity_parameter;
+extern std::map<sched_affinity::Thread_type, const char*> sched_affinity_parameter;
 
 #if defined(_WIN32)
 /*

@@ -1391,7 +1391,7 @@ static bool on_session_track_gtids_update(sys_var *, THD *thd, enum_var_type) {
   return false;
 }
 
-std::map<sched_affinity::Thread_type, char *> sched_affinity_parameter = {
+std::map<sched_affinity::Thread_type, const char *> sched_affinity_parameter = {
     {sched_affinity::Thread_type::FOREGROUND, nullptr},
     {sched_affinity::Thread_type::LOG_WRITER, nullptr},
     {sched_affinity::Thread_type::LOG_FLUSHER, nullptr},

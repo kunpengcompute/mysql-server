@@ -956,7 +956,7 @@ static bool log_consider_checkpoint(log_t &log) {
 void log_checkpointer(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_CHECKPOINTER)){
+    if(!sched_affinity_manager->bind_to_target(sched_affinity::Thread_type::LOG_CHECKPOINTER)){
       ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_checkpointer");
     }
   }
