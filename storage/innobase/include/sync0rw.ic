@@ -38,6 +38,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
  *******************************************************/
 
 #include "os0event.h"
+#include "lock0aarch64_atomic.h"
 
 /** Lock an rw-lock in shared mode for the current thread. If the rw-lock is
  locked in exclusive mode, or there is an exclusive lock request waiting,
@@ -259,7 +260,7 @@ lint rw_lock_lock_word_incr(rw_lock_t *lock, /*!< in/out: rw-lock */
                             ulint amount)    /*!< in: amount of increment */
 {
 #ifdef INNODB_RW_LOCKS_USE_ATOMICS
-  return (os_atomic_increment_lint(&lock->lock_word, amount));
+  return word_add_fetch(&lock->lock_word, amount);
 #else  /* INNODB_RW_LOCKS_USE_ATOMICS */
   lint local_lock_word;
 
