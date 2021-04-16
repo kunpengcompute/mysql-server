@@ -2488,7 +2488,10 @@ bool sp_head::execute_trigger(THD *thd, const LEX_CSTRING &db_name,
 
   locker = MYSQL_START_SP(&psi_state, m_sp_share);
 #endif
+  // disable paralle query for trigger
+  thd->in_sp_trigger = true;
   err_status = execute(thd, false);
+  thd->in_sp_trigger = false; 
 #ifdef HAVE_PSI_SP_INTERFACE
   MYSQL_END_SP(locker);
 #endif
@@ -2678,7 +2681,10 @@ bool sp_head::execute_function(THD *thd, Item **argp, uint argcount,
 
   locker = MYSQL_START_SP(&psi_state, m_sp_share);
 #endif
+  // disable parallel query for store function 
+  thd->in_sp_trigger = true;
   err_status = execute(thd, true);
+  thd->in_sp_trigger = false; 
 #ifdef HAVE_PSI_SP_INTERFACE
   MYSQL_END_SP(locker);
 #endif
@@ -2881,7 +2887,10 @@ bool sp_head::execute_procedure(THD *thd, List<Item> *args) {
 
   locker = MYSQL_START_SP(&psi_state, m_sp_share);
 #endif
+  // disable parallel query for store procedure
+  thd->in_sp_trigger = true;
   if (!err_status) err_status = execute(thd, true);
+  thd->in_sp_trigger = false;
 #ifdef HAVE_PSI_SP_INTERFACE
   MYSQL_END_SP(locker);
 #endif

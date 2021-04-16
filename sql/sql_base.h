@@ -211,7 +211,7 @@ bool insert_fields(THD *thd, Name_resolution_context *context,
                    List_iterator<Item> *it, bool any_privileges);
 bool setup_fields(THD *thd, Ref_item_array ref_item_array, List<Item> &item,
                   ulong privilege, List<Item> *sum_func_list,
-                  bool allow_sum_func, bool column_update);
+                  bool allow_sum_func, bool column_update, bool skip_check_grant=false);
 bool fill_record(THD *thd, TABLE *table, List<Item> &fields, List<Item> &values,
                  MY_BITMAP *bitmap, MY_BITMAP *insert_into_fields_bitmap,
                  bool raise_autoinc_has_expl_non_null_val);

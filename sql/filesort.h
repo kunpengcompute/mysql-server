@@ -51,6 +51,8 @@ class Filesort {
   THD *m_thd;
   /// The table we are sorting.
   TABLE *const table;
+  ///  List of expressions to order the table by
+  ORDER *m_order;
   /// If true, do not free the filesort buffers (use if you expect to sort many
   /// times, like in an uncacheable subquery).
   const bool keep_buffers;
@@ -87,9 +89,9 @@ class Filesort {
   /// order is properly set up.
   bool using_addon_fields();
 
- private:
   /* Prepare ORDER BY list for sorting. */
   uint make_sortorder(ORDER *order);
+ private:
 
   uint m_sort_order_length;
 };

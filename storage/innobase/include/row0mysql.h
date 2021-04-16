@@ -61,11 +61,13 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "trx0types.h"
 #include "univ.i"
 #include "ut0bool_scope_guard.h"
+#include "row0pread.h"
 
 // Forward declarations
 class THD;
 class ha_innobase;
 class innodb_session_t;
+
 namespace dd {
 class Table;
 }
@@ -886,7 +888,18 @@ struct row_prebuilt_t {
   causing an error.
   @return true iff duplicated values should be allowed */
   bool allow_duplicates() { return (replace || on_duplicate_key_update); }
+  
+  std::shared_ptr<Parallel_reader::Ctx> ctx{};
+  bool is_attach_ctx{false};
+  mem_heap_t *pq_heap{nullptr};
+  dtuple_t *pq_tuple{nullptr};
+  bool pq_index_read{false};
+  /** Number of externally stored columns. */
+  ulint pq_m_n_ext{ULINT_UNDEFINED};
 
+  bool pq_requires_clust_rec{false};
+
+   
  private:
   /** A helper function for init_search_tuples_types() which prepares the shape
   of the tuple to match the index

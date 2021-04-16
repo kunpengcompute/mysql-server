@@ -152,6 +152,8 @@ class ReadView {
  public:
   ReadView();
   ~ReadView();
+
+  void Copy_readView(const ReadView &);
   /** Check whether transaction id is valid.
   @param[in]	id		transaction id to check
   @param[in]	name		table name */
@@ -276,8 +278,10 @@ class ReadView {
 
  private:
   // Disable copying
-  ReadView(const ReadView &);
   ReadView &operator=(const ReadView &);
+
+ public:
+    bool skip_view_list{false};
 
  private:
   /** The read should not see any transaction with trx id >= this

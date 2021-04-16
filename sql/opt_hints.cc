@@ -83,6 +83,8 @@ struct st_opt_hint_info opt_hint_info[] = {
     {"JOIN_INDEX", false, false, false},
     {"GROUP_INDEX", false, false, false},
     {"ORDER_INDEX", false, false, false},
+    {"PQ", true, true, false},
+    {"NO_PQ", true, true, false},
     {nullptr, false, false, false}};
 
 /**

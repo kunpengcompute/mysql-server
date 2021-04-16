@@ -923,6 +923,19 @@ void _db_pop_() {
   }
 }
 
+void pq_stack_copy(CODE_STATE *leader_cs){
+  CODE_STATE *cs;
+  get_code_state_or_return;
+  DBUG_ASSERT(cs->stack == &init_settings);
+  cs->stack = leader_cs->stack;
+}
+
+void pq_stack_reset(){
+  CODE_STATE *cs;
+  get_code_state_or_return;
+  cs->stack = &init_settings;
+}
+
 /*
  *  FUNCTION
  *

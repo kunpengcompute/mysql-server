@@ -111,13 +111,11 @@
 #include "sql_string.h"
 #include "template_utils.h"
 #include "thr_lock.h"
+#include "sql/sql_parallel.h"
 
 using std::max;
 using std::min;
 
-static store_key *get_store_key(THD *thd, Key_use *keyuse,
-                                table_map used_tables, KEY_PART_INFO *key_part,
-                                uchar *key_buff, uint maybe_null);
 static uint actual_key_flags(KEY *key_info);
 
 using Global_tables_iterator =
@@ -918,6 +916,7 @@ static bool optimize_secondary_engine(THD *thd) {
          secondary_engine->optimize_secondary_engine(thd, thd->lex);
 }
 
+void thd_set_thread_stack(THD *thd, const char *stack_start);
 /**
   Execute a DML statement.
   This is the default implementation for a DML statement and uses a
@@ -927,7 +926,7 @@ static bool optimize_secondary_engine(THD *thd) {
   query blocks combined with UNION.
 */
 
-bool Sql_cmd_dml::execute_inner(THD *thd) {
+bool Sql_cmd_dml::execute_inner(THD *thd){
   SELECT_LEX_UNIT *unit = lex->unit;
 
   if (unit->optimize(thd, /*materialize_destination=*/nullptr)) return true;
@@ -939,10 +938,25 @@ bool Sql_cmd_dml::execute_inner(THD *thd) {
   // Perform secondary engine optimizations, if needed.
   if (optimize_secondary_engine(thd)) return true;
 
+  if (thd->pq_dop && unit->is_simple())
+  {
+    JOIN *join= unit->first_select()->join;
+    PQ_exec_status status = make_pq_leader_plan(join, thd->pq_dop);
+
+    if (status == PQ_exec_status::ABORT_EXEC)
+      return true;
+    
+    DBUG_ASSERT(status == PQ_exec_status::SEQ_EXEC || 
+        status == PQ_exec_status::PARL_EXEC);
+
+    DEBUG_SYNC(thd, "after_pq_leader_plan");
+  }
+
   if (lex->is_explain()) {
     if (explain_query(thd, thd, unit)) return true; /* purecov: inspected */
   } else {
-    if (unit->execute(thd)) return true;
+    if (unit->execute(thd)) 
+      return true;
   }
 
   return false;
@@ -1721,18 +1735,39 @@ bool JOIN::destroy() {
   // deleting said objects (e.g. temporary tables).
   m_root_iterator.reset();
 
-  if (qep_tab) {
+  /*
+   * for worker (or normal mode), we know that qep_tab0 = qep_tab, and qep_tab1 = NULL;
+   * Nevertheless, qep_tab0 = old(qep_tab), and qep_tab = qep_tab1 = new (qep_tab) for leader.
+   * Note that: as qep_tab0 and qep_tab (qep_tab1) share the same QEP_shared_owner (i.e., m_qs),
+   *            they must have the same table info.
+   */
+  if (qep_tab0) {
     DBUG_ASSERT(!join_tab);
-    for (uint i = 0; i < tables; i++) {
-      TABLE *table = qep_tab[i].table();
-      if (table != nullptr) {
-        // These were owned by the root iterator, which we just destroyed.
-        // Keep filesort_free_buffers() from trying to call CleanupAfterQuery()
-        // on them.
+    uint tables_num = tables >= old_tables ? tables : old_tables;
+    for (uint i = 0; i < tables_num; i++) {
+      QEP_TAB *qtab;
+      qtab = &qep_tab[i];
+      if (qtab->gather && !thd->running_explain_analyze && !thd->is_worker()) {
+        qtab->gather->end();
+        qtab->gather = nullptr;
+      }
+      TABLE *table = qep_tab0[i].table();
+      TABLE *old_table = qep_tab0[i].old_table();
+
+      if (NULL != table) {
         table->sorting_iterator = nullptr;
         table->duplicate_removal_iterator = nullptr;
       }
-      qep_tab[i].cleanup();
+
+      if (NULL != old_table) {
+        old_table->sorting_iterator = NULL;
+        old_table->duplicate_removal_iterator = NULL;
+      }
+
+      /* only clean iterator, filesort, op (etc.) info.  */
+      if (qep_tab1) qep_tab1[i].cleanup(false);
+      qep_tab0[i].cleanup(true);
+
     }
   }
   if (join_tab || best_ref) {
@@ -1749,20 +1784,33 @@ bool JOIN::destroy() {
 
   // Run Cached_item DTORs!
   group_fields.destroy_elements();
-
-  tmp_table_param.cleanup();
+  tmp_table_param->cleanup();
 
   /* Cleanup items referencing temporary table columns */
-  if (tmp_all_fields != nullptr) {
-    cleanup_item_list(tmp_all_fields[REF_SLICE_TMP1]);
-    cleanup_item_list(tmp_all_fields[REF_SLICE_TMP2]);
-    cleanup_item_list(tmp_all_fields[REF_SLICE_ORDERED_GROUP_BY]);
+  if (tmp_all_fields1 != nullptr) {
+    cleanup_item_list(tmp_all_fields1[REF_SLICE_TMP1]);
+    cleanup_item_list(tmp_all_fields1[REF_SLICE_TMP2]);
+    cleanup_item_list(tmp_all_fields1[REF_SLICE_ORDERED_GROUP_BY]);
+    cleanup_item_list(tmp_all_fields1[REF_SLICE_PQ_TMP]);
     for (uint widx = 0; widx < m_windows.elements; widx++) {
-      cleanup_item_list(tmp_all_fields[REF_SLICE_WIN_1 + widx]);
-      cleanup_item_list(tmp_all_fields[REF_SLICE_WIN_1 + widx +
+      cleanup_item_list(tmp_all_fields1[REF_SLICE_WIN_1 + widx]);
+      cleanup_item_list(tmp_all_fields1[REF_SLICE_WIN_1 + widx +
                                        m_windows.elements]);  // frame buffer
     }
   }
+
+  if (tmp_all_fields0 != nullptr) {
+    cleanup_item_list(tmp_all_fields0[REF_SLICE_TMP1]);
+    cleanup_item_list(tmp_all_fields0[REF_SLICE_TMP2]);
+    cleanup_item_list(tmp_all_fields0[REF_SLICE_ORDERED_GROUP_BY]);
+    cleanup_item_list(tmp_all_fields0[REF_SLICE_PQ_TMP]);
+    for (uint widx = 0; widx < m_windows.elements; widx++) {
+      cleanup_item_list(tmp_all_fields0[REF_SLICE_WIN_1 + widx]);
+      cleanup_item_list(tmp_all_fields0[REF_SLICE_WIN_1 + widx +
+                                        m_windows.elements]);  // frame buffer
+    }
+  }
+
   destroy_sj_tmp_tables(this);
 
   List_iterator<Semijoin_mat_exec> sjm_list_it(sjm_exec_list);
@@ -1770,7 +1818,7 @@ bool JOIN::destroy() {
   while ((sjm = sjm_list_it++)) ::destroy(sjm);
   sjm_exec_list.empty();
 
-  keyuse_array.clear();
+  keyuse_array->clear();
   return error;
 }
 
@@ -2243,7 +2291,7 @@ class store_key_json_item final : public store_key_item {
 
 }  // namespace
 
-static store_key *get_store_key(THD *thd, Key_use *keyuse,
+store_key *get_store_key(THD *thd, Key_use *keyuse,
                                 table_map used_tables, KEY_PART_INFO *key_part,
                                 uchar *key_buff, uint maybe_null) {
   if (key_part->field->is_array()) {
@@ -2474,7 +2522,7 @@ bool and_conditions(Item **e1, Item *e2) {
     Index condition, or NULL if no condition could be inferred.
 */
 
-static Item *make_cond_for_index(Item *cond, TABLE *table, uint keyno,
+Item *make_cond_for_index(Item *cond, TABLE *table, uint keyno,
                                  bool other_tbls_ok) {
   DBUG_ASSERT(cond != nullptr);
 
@@ -2541,7 +2589,7 @@ static Item *make_cond_for_index(Item *cond, TABLE *table, uint keyno,
   return cond;
 }
 
-static Item *make_cond_remainder(Item *cond, bool exclude_index) {
+Item *make_cond_remainder(Item *cond, bool exclude_index) {
   if (exclude_index && cond->marker == Item::MARKER_ICP_COND_USES_INDEX_ONLY)
     return nullptr; /* Already checked */
 
@@ -2672,6 +2720,14 @@ void QEP_TAB::push_index_cond(const JOIN_TAB *join_tab, uint keyno,
       !has_guarded_conds() && type() != JT_CONST && type() != JT_SYSTEM &&
       !(keyno == tbl->s->primary_key &&
         tbl->file->primary_key_is_clustered())) {
+
+    if (do_parallel_scan)
+    {
+      has_pq_cond = true;
+      pq_cond = condition()->pq_clone(join_->thd, join_->select_lex);
+
+      if (!pq_cond) return ;
+    }
     DBUG_EXECUTE("where", print_where(join_->thd, condition(), "full cond",
                                       QT_ORDINARY););
     Item *idx_cond =
@@ -3227,7 +3283,12 @@ void JOIN_TAB::cleanup() {
     qs_cleanup();
 }
 
-void QEP_TAB::cleanup() {
+
+/*
+ * As qep_tab0 and qep_tab1 share the same table info., we only free these tables once
+ * and the free procedure is finished in qep_tab0.
+*/
+void QEP_TAB::cleanup(bool is_free) {
   // Delete parts specific of QEP_TAB:
   destroy(filesort);
   filesort = nullptr;
@@ -3235,21 +3296,31 @@ void QEP_TAB::cleanup() {
   if (quick_optim() != quick()) delete quick_optim();
 
   TABLE *const t = table();
+  TABLE * const old_t = old_table();
 
   if (t) t->reginfo.qep_tab = nullptr;
 
   // Delete shared parts:
-  qs_cleanup();
+  if (is_free) qs_cleanup();
 
   // Order of qs_cleanup() and this, matters:
-  if (op_type == QEP_TAB::OT_MATERIALIZE ||
-      op_type == QEP_TAB::OT_AGGREGATE_THEN_MATERIALIZE ||
-      op_type == QEP_TAB::OT_AGGREGATE_INTO_TMP_TABLE ||
-      op_type == QEP_TAB::OT_WINDOWING_FUNCTION) {
-    if (t)  // Check tmp table is not yet freed.
-      free_tmp_table(current_thd, t);
-    destroy(tmp_table_param);
-    tmp_table_param = nullptr;
+  if (is_free) {
+    if (op_type == QEP_TAB::OT_MATERIALIZE ||
+        op_type == QEP_TAB::OT_AGGREGATE_THEN_MATERIALIZE ||
+        op_type == QEP_TAB::OT_AGGREGATE_INTO_TMP_TABLE ||
+        op_type == QEP_TAB::OT_WINDOWING_FUNCTION) {
+
+      /** free only tmp table */
+      if (old_t)
+        free_tmp_table(current_thd, old_t);
+      if (t)  // Check tmp table is not yet freed.
+        free_tmp_table(current_thd, t);
+      destroy(tmp_table_param);
+      tmp_table_param = nullptr;
+    } else {
+      if (t != nullptr && old_t && t->s->table_category == TABLE_CATEGORY_TEMPORARY)
+        free_tmp_table(current_thd, t);
+    }
   }
 }
 
@@ -3267,6 +3338,20 @@ void QEP_shared_owner::qs_cleanup() {
       table_ref->derived_key_list.empty();
     }
   }
+
+  if (old_table() &&
+      (old_table()->s->tmp_table != INTERNAL_TMP_TABLE || old_table()->is_created())) {
+    old_table()->set_keyread(false);
+    old_table()->file->ha_index_or_rnd_end();
+    free_io_cache(old_table());
+    filesort_free_buffers(old_table(), true);
+    TABLE_LIST *const table_ref = old_table()->pos_in_table_list;
+    if (table_ref) {
+      table_ref->derived_keys_ready = false;
+      table_ref->derived_key_list.empty();
+    }
+  }
+
   delete quick();
 }
 
@@ -3417,6 +3502,10 @@ void JOIN::cleanup() {
         DBUG_ASSERT(!join_tab);
         qtab = &qep_tab[i];
         table = qtab->table();
+
+        if (qtab->gather && !thd->running_explain_analyze && !thd->is_worker()) {
+          qtab->gather->m_table->file->ha_index_or_rnd_end();
+        }
       } else {
         qtab = nullptr;
         table = (join_tab ? &join_tab[i] : best_ref[i])->table();
@@ -3434,21 +3523,101 @@ void JOIN::cleanup() {
   set_ref_item_slice(REF_SLICE_SAVED_BASE);
 }
 
-/**
-  Filter out ORDER items those are equal to constants in WHERE
+bool JOIN::make_pq_tables_info(){
 
-  This function is a limited version of remove_const() for use
-  with non-JOIN statements (i.e. single-table UPDATE and DELETE).
+  DBUG_ENTER("JOIN::make_pq_tables_info");
+  List<Item> *curr_all_fields, *curr_fields_list;
+  TABLE *table = NULL;
+  List<Item> table_item_list;
+  List_iterator_fast<Item> it;
+  Query_result_mq *query_result = NULL;
+  Item *tmp_item = NULL;
 
+  bool flag = (last_slice_before_pq == REF_SLICE_SAVED_BASE) ? 1 : 0;
+  /* field comes from field_list or tmp_table's fields */
+  curr_all_fields = flag ? &all_fields : &tmp_all_fields[last_slice_before_pq];
+  curr_fields_list = flag ? &fields_list : &tmp_fields_list[last_slice_before_pq];
 
-  @param order            Linked list of ORDER BY arguments.
-  @param where            Where condition.
+  const bool may_trace =  // just to avoid an empty trace block
+          need_tmp_before_win || implicit_grouping || m_windowing_steps ||
+          group_list || order;
 
-  @return pointer to new filtered ORDER list or NULL if whole list eliminated
+  Opt_trace_context *const trace = &thd->opt_trace;
+  Opt_trace_disable_I_S trace_disabled(trace, !may_trace);
+  Opt_trace_object wrapper(trace);
+  Opt_trace_array trace_tmp(trace, "making tmp table for MQ");
 
-  @note
-    This function overwrites input order list.
-*/
+  query_result = down_cast<Query_result_mq*>(unit->query_result());
+  DBUG_ASSERT(query_result && query_result->m_param);
+  List<Item> tmplist(*curr_all_fields, thd->pq_mem_root);
+
+  Temp_table_param *tmp_param = query_result->m_param;
+  tmp_param->pq_copy(saved_tmp_table_param);
+  tmp_param->hidden_field_count =
+          curr_all_fields->elements - curr_fields_list->elements;
+  tmp_param->m_window_frame_buffer = true;
+  tmp_param->skip_create_table = true;
+
+  /*
+   * set saved_sum_func= true, then temp table will create a Item_field for sum funcs
+   * in tmplist, which we call it sum_field that use for recieving PQ workers's sum data
+   */
+  table = create_tmp_table(thd, tmp_param, tmplist, nullptr, false, true,
+                           select_lex->active_options(), HA_POS_ERROR, "", true);
+  query_result->m_table = table;
+
+  // the leader/worker's table is not same
+  if (!table || !thd->pq_leader
+      || table->s->fields != thd->pq_leader->pq_check_fields
+      || table->s->reclength != thd->pq_leader->pq_check_reclen
+      || DBUG_EVALUATE_IF("pq_worker_error5", true, false)) {
+    goto err;
+  }
+
+  //we should remove const_item that doesn't generate result_field in table->field
+  it.init(tmplist);
+  while ((tmp_item = it++)) {
+    // check const_item
+    if (tmp_item->skip_create_tmp_table) {
+      DBUG_ASSERT(tmp_item->const_item());
+      continue;
+    }
+
+    //check Item_copy.
+    if (tmp_item->type() == Item::COPY_STR_ITEM) {
+      Item *orig_item = down_cast<Item_copy *>(tmp_item)->get_item();
+      DBUG_ASSERT(orig_item);
+      if (orig_item->skip_create_tmp_table) {
+        DBUG_ASSERT(orig_item->const_item());
+        continue;
+      }
+    }
+    table_item_list.push_back(tmp_item);
+  }
+
+  if (table_item_list.elements != table->s->fields
+       || alloc_ref_item_slice(thd, REF_SLICE_PQ_TMP))
+    goto err;
+
+  /* table_item_list consists of items needed to send to MQ,
+   *   and we store this list into REF_SLICE_PQ_TMP position
+   */
+
+  tmp_all_fields[REF_SLICE_PQ_TMP] = table_item_list;
+  DBUG_RETURN(false);
+
+err:
+  if (!thd->pq_error) {
+    //here, occurs an error
+    MQueue_handle *handle = query_result->get_mq_handler();
+    if (handle) {
+      handle->send_exception_msg(ERROR_MSG);
+      handle->set_datched_status(MQ_HAVE_DETACHED);
+    }
+    thd->pq_error = true;
+  }
+  DBUG_RETURN(true);
+}
 
 ORDER *simple_remove_const(ORDER *order, Item *where) {
   if (!order || !where) return order;
@@ -3506,7 +3675,7 @@ static bool test_if_equality_guarantees_uniqueness(const Item *l,
   or if i1 is a wrapper item around the f2 field.
 */
 
-static bool equal(const Item *i1, const Item *i2, const Field *f2) {
+static bool my_item_equal(const Item *i1, const Item *i2, const Field *f2) {
   DBUG_ASSERT((i2 == nullptr) ^ (f2 == nullptr));
 
   if (i2 != nullptr)
@@ -3562,13 +3731,13 @@ bool const_expression_in_where(Item *cond, Item *comp_item,
       return false;
     Item *left_item = ((Item_func *)cond)->arguments()[0];
     Item *right_item = ((Item_func *)cond)->arguments()[1];
-    if (equal(left_item, comp_item, comp_field)) {
+    if (my_item_equal(left_item, comp_item, comp_field)) {
       if (test_if_equality_guarantees_uniqueness(left_item, right_item)) {
         if (*const_item) return right_item->eq(*const_item, true);
         *const_item = right_item;
         return true;
       }
-    } else if (equal(right_item, comp_item, comp_field)) {
+    } else if (my_item_equal(right_item, comp_item, comp_field)) {
       if (test_if_equality_guarantees_uniqueness(right_item, left_item)) {
         if (*const_item) return left_item->eq(*const_item, true);
         *const_item = left_item;
@@ -3766,9 +3935,9 @@ void calc_group_buffer(JOIN *join, ORDER *group) {
     parts++;
     if (group_item->maybe_null) null_parts++;
   }
-  join->tmp_table_param.group_length = key_length + null_parts;
-  join->tmp_table_param.group_parts = parts;
-  join->tmp_table_param.group_null_parts = null_parts;
+  join->tmp_table_param->group_length = key_length + null_parts;
+  join->tmp_table_param->group_parts = parts;
+  join->tmp_table_param->group_null_parts = null_parts;
 }
 
 /**
@@ -3785,7 +3954,7 @@ bool JOIN::alloc_func_list() {
   uint func_count, group_parts;
   DBUG_TRACE;
 
-  func_count = tmp_table_param.sum_func_count;
+  func_count = tmp_table_param->sum_func_count;
   /*
     If we are using rollup, we need a copy of the summary functions for
     each level
@@ -4250,6 +4419,591 @@ bool JOIN::add_having_as_tmp_table_cond(uint curr_tmp_table) {
   return false;
 }
 
+bool JOIN::make_leader_tables_info() {
+
+  bool base_slice = (last_slice_before_pq == REF_SLICE_SAVED_BASE);
+  List<Item> *curr_all_fields = base_slice ? &all_fields : &tmp_all_fields0[last_slice_before_pq];
+  List<Item> *curr_fields_list = base_slice ? &fields_list : &tmp_fields_list0[last_slice_before_pq];
+
+  bool materialize_join = false;
+  uint curr_tmp_table = primary_tables;
+  TABLE *exec_tmp_table = NULL;
+
+  const bool may_trace =  // just to avoid an empty trace block
+      need_tmp_before_win || implicit_grouping || m_windowing_steps ||
+      group_list || order;
+
+  Opt_trace_context *const trace = &thd->opt_trace;
+  Opt_trace_disable_I_S trace_disabled(trace, !may_trace);
+  Opt_trace_object wrapper(trace);
+  Opt_trace_array trace_tmp(trace, "considering_tmp_tables");
+
+  DBUG_ENTER("JOIN::make_leader_tables_info");
+
+  const bool has_group_by = this->grouped;
+  tmp_table_param->cleanup();
+  tmp_table_param->pq_copy(saved_tmp_table_param);
+  tmp_table_param->copy_fields.clear();
+
+  //uint last_slice_before_windowing = REF_SLICE_ACTIVE;
+
+  if (alloc_ref_item_slice(thd, REF_SLICE_SAVED_BASE))
+      DBUG_RETURN(true);
+
+  copy_ref_item_slice(REF_SLICE_SAVED_BASE, REF_SLICE_ACTIVE);
+  current_ref_item_slice = REF_SLICE_SAVED_BASE;
+
+  Opt_trace_object trace_this_tbl(trace);
+  trace_this_tbl.add("adding_tmp_table_in_plan_at_position", curr_tmp_table)
+          .add_alnum("cause", "output_for_parallel_query");
+  QEP_TAB *tab = &qep_tab[curr_tmp_table];
+
+  pq_replace_avg_func(thd, select_lex, curr_all_fields,
+                      (nesting_map)1 << (unsigned int)select_lex->nest_level);
+
+  Temp_table_param *tmp_param =
+          new (thd->mem_root) Temp_table_param(*tmp_table_param);
+  if (!tmp_param) DBUG_RETURN(true);
+
+  tmp_param->m_window_frame_buffer = true;
+  List<Item> tmplist(*curr_all_fields, thd->mem_root);
+
+  tmp_param->hidden_field_count =
+      curr_all_fields->elements - curr_fields_list->elements;
+  tmp_param->skip_create_table = true;
+  
+  // create_tmp_table may change the original item's result_field, hence
+  // we must save it before.
+  std::vector<Field *> saved_result_field (tmplist.size(), nullptr);
+  List_iterator_fast<Item> it(*curr_all_fields);
+  Item *tmp_item = nullptr;
+  uint i;
+
+  for (i = 0, tmp_item = it++; tmp_item; i++, tmp_item = it++) {
+    if (tmp_item->type() == Item::FIELD_ITEM || tmp_item->type() == Item::DEFAULT_VALUE_ITEM) {
+      saved_result_field[i] = down_cast<Item_field *>(tmp_item)->result_field;
+    } else {
+      saved_result_field[i] = tmp_item->get_result_field();
+    }
+  }
+
+  std::vector<Field *> saved_join_fields (fields->size(), nullptr);
+  List_iterator_fast<Item> fields_it(*fields);
+  for (i = 0, tmp_item = fields_it++; tmp_item; i++, tmp_item = fields_it++) {
+    if (tmp_item->type() == Item::FIELD_ITEM || tmp_item->type() == Item::DEFAULT_VALUE_ITEM) {
+      saved_join_fields[i] = down_cast<Item_field *>(tmp_item)->field;
+    } 
+  }
+  
+  /*
+   * set saved_sum_func= true, then temp table will create a Item_field for sum funcs
+   * in tmplist, which we call it sum_field that use for recieving PQ workers's sum data
+   */
+  TABLE *table =
+          create_tmp_table(thd, tmp_param, tmplist, nullptr, false, true,
+                           select_lex->active_options(), HA_POS_ERROR, "", true);
+  if (!table) DBUG_RETURN(true);
+  table->materialized= false;
+  tmp_tables = 1;
+
+  // check the rewritten table
+  thd->pq_check_fields = table->s->fields;
+  thd->pq_check_reclen = table->s->reclength;
+
+  tab->set_table(table);
+  tab->tmp_table_param = tmp_param;
+
+  //restore result_field->name
+  it.rewind();
+  for (i = 0, tmp_item = it++; tmp_item; i++, tmp_item = it++) {
+    if (tmp_item->type() == Item::FIELD_ITEM || tmp_item->type() == Item::DEFAULT_VALUE_ITEM) {
+      // create_tmp_table may change the original item's result_field,
+      // restore field_name to pass the main.metadata test
+      (down_cast<Item_field *>(tmp_item)->result_field)->field_name = saved_result_field[i]->field_name;
+      if (tmp_item->const_item()) {
+        uint32 length = (down_cast<Item_field *>(tmp_item)->get_orig_field())->data_length();
+        memcpy((down_cast<Item_field *>(tmp_item)->result_field)->ptr,
+               (down_cast<Item_field *>(tmp_item)->get_orig_field())->ptr,
+               length);
+      }
+    }
+  }
+
+  /*
+     Allocate a slice of ref items that describe the items to be copied
+     from the second temporary table.
+  */
+  if (alloc_ref_item_slice(thd, REF_SLICE_PQ_TMP)) DBUG_RETURN(true);
+
+  // No sum funcs anymore
+  if (change_to_use_tmp_fields(
+          *curr_all_fields, curr_fields_list->size(), thd,
+          ref_items[REF_SLICE_PQ_TMP], &tmp_fields_list[REF_SLICE_PQ_TMP],
+          &tmp_all_fields[REF_SLICE_PQ_TMP]))
+    DBUG_RETURN(true);
+   /*
+    * create sum() base on tmp table's sum_field which is sum of worker send.
+    */
+  if (pq_build_sum_funcs(thd, select_lex, ref_items[REF_SLICE_PQ_TMP],
+      tmp_all_fields[REF_SLICE_PQ_TMP], tmp_fields_list[REF_SLICE_PQ_TMP].elements,
+      (nesting_map)1 << (unsigned int) select_lex->nest_level)) {
+    DBUG_RETURN(true);
+  }
+  curr_fields_list = &tmp_fields_list[REF_SLICE_PQ_TMP];
+  curr_all_fields = &tmp_all_fields[REF_SLICE_PQ_TMP];
+  set_ref_item_slice(REF_SLICE_PQ_TMP);
+  if (qep_tab != nullptr)
+    qep_tab[curr_tmp_table].ref_item_slice = REF_SLICE_PQ_TMP;
+
+  /* save based slice of parallel query */
+  copy_ref_item_slice(REF_SLICE_SAVED_BASE, REF_SLICE_ACTIVE);
+  current_ref_item_slice = REF_SLICE_SAVED_BASE;
+
+  /* re-generate group_list based on group_list and curr_all_fields */
+  if (group_list) {
+    group_fields_cache.empty();
+    group_fields.destroy_elements();
+  }
+
+  if (group_list || tmp_table_param->sum_func_count) {
+     if (make_sum_func_list(*curr_all_fields, *curr_fields_list, true, true))
+        DBUG_RETURN(true);
+  }
+
+  /*
+    Create the first temporary table if distinct elimination is requested or
+    if the sort is too complicated to be evaluated as a filesort.
+  */
+  if (need_tmp_before_win) {
+    curr_tmp_table++;
+    tmp_tables++;
+    /*
+      Create temporary table for use in a single execution.
+      (Will be reused if this is a subquery that is executed several times
+       for one execution of the statement)
+      Don't use tmp table grouping for json aggregate funcs as it's
+      very ineffective.
+    */
+    ORDER_with_src tmp_group;
+    if (!simple_group && !(test_flags & TEST_NO_KEY_GROUP) && !with_json_agg)
+      tmp_group = group_list;
+
+    tmp_table_param->hidden_field_count =
+        curr_all_fields->elements - curr_fields_list->elements;
+
+    QEP_TAB *win_tab = &qep_tab[curr_tmp_table];
+    win_tab->set_old_table(win_tab->table());
+    if (create_intermediate_table(&qep_tab[curr_tmp_table], curr_all_fields,
+                                  tmp_group, group_list && simple_group))
+      DBUG_RETURN(true);
+    exec_tmp_table = qep_tab[curr_tmp_table].table();
+
+    if (exec_tmp_table->is_distinct) optimize_distinct();
+
+    /*
+      Allocate a slice of ref items that describe the items to be copied
+      from the first temporary table.
+    */
+    if (alloc_ref_item_slice(thd, REF_SLICE_TMP1)) DBUG_RETURN(true);
+
+    // Change sum_fields reference to calculated fields in tmp_table
+    if (streaming_aggregation || qep_tab[curr_tmp_table].table()->group ||
+        tmp_table_param->precomputed_group_by) {
+      if (change_to_use_tmp_fields(*curr_all_fields, curr_fields_list->size(), thd,
+                                   ref_items[REF_SLICE_TMP1],
+                                   &tmp_fields_list[REF_SLICE_TMP1],
+                                   &tmp_all_fields[REF_SLICE_TMP1]))
+        DBUG_RETURN(true);
+    } else {
+      if (change_refs_to_tmp_fields(*curr_all_fields, curr_fields_list->size(), thd,
+                                    ref_items[REF_SLICE_TMP1],
+                                    &tmp_fields_list[REF_SLICE_TMP1],
+                                    &tmp_all_fields[REF_SLICE_TMP1]))
+        DBUG_RETURN(true);
+    }
+
+    curr_all_fields = &tmp_all_fields[REF_SLICE_TMP1];
+    curr_fields_list = &tmp_fields_list[REF_SLICE_TMP1];
+    // Need to set them now for correct group_fields setup, reset at the end.
+    set_ref_item_slice(REF_SLICE_TMP1);
+    qep_tab[curr_tmp_table].ref_item_slice = REF_SLICE_TMP1;
+    setup_tmptable_write_func(&qep_tab[curr_tmp_table], &trace_this_tbl);
+    //last_slice_before_windowing = REF_SLICE_TMP1;
+
+    if (rollup.state == ROLLUP::STATE_READY)
+      switch_slice_for_rollup_fields(*curr_all_fields, *curr_fields_list);
+
+    /*
+      If having is not handled here, it will be checked before the row is sent
+      to the client.
+    */
+    if (having_cond && (streaming_aggregation ||
+                        (exec_tmp_table->is_distinct && !group_list))) {
+      /*
+        If there is no select distinct or rollup, then move the having to table
+        conds of tmp table.
+        NOTE : We cannot apply having after distinct. If columns of having are
+               not part of select distinct, then distinct may remove rows
+               which can satisfy having.
+
+        As this condition will read the tmp table, it is appropriate that
+        REF_SLICE_TMP1 is in effect when we create it below.
+      */
+      if ((!select_distinct && rollup.state == ROLLUP::STATE_NONE) &&
+          add_having_as_tmp_table_cond(curr_tmp_table))
+        DBUG_RETURN(true);
+
+      /*
+        Having condition which we are not able to add as tmp table conds are
+        kept as before. And, this will be applied before storing the rows in
+        tmp table.
+      */
+      qep_tab[curr_tmp_table].having = having_cond;
+      having_cond = NULL;  // Already done
+    }
+
+    tmp_table_param->func_count = 0;
+
+    if (streaming_aggregation || qep_tab[curr_tmp_table].table()->group) {
+      tmp_table_param->field_count += tmp_table_param->sum_func_count;
+      tmp_table_param->sum_func_count = 0;
+    }
+    /** check if group by has to respect ordering. If true, move group by
+        to order by */
+    if (exec_tmp_table->group) {  // Already grouped
+      if (!order && !skip_sort_order) {
+        for (ORDER *group = group_list; group; group = group->next) {
+          if (group->direction != ORDER_NOT_RELEVANT) {
+            order = group_list; /* order by group */
+            break;
+          }
+        }
+      }
+      group_list = NULL;
+    }
+    /*
+      If we have different sort & group then we must sort the data by group
+      and copy it to a second temporary table.
+      This code is also used if we are using distinct something
+      we haven't been able to store in the temporary table yet
+      like SEC_TO_TIME(SUM(...)) or when distinct is used with rollup.
+    */
+//  ============== not yet test ==================
+    if ((group_list &&
+         (!test_if_subpart(group_list, order) || select_distinct ||
+          m_windowing_steps || rollup.state != ROLLUP::STATE_NONE)) ||
+        (select_distinct && (tmp_table_param->using_outer_summary_function ||
+                             rollup.state != ROLLUP::STATE_NONE))) {
+      DBUG_PRINT("info", ("Creating group table"));
+
+      calc_group_buffer(this, group_list);
+      count_field_types(select_lex, tmp_table_param,
+                        tmp_all_fields[REF_SLICE_TMP1],
+                        select_distinct && !group_list, false);
+      tmp_table_param->hidden_field_count =
+          tmp_all_fields[REF_SLICE_TMP1].elements -
+          tmp_fields_list[REF_SLICE_TMP1].elements;
+      streaming_aggregation = false;
+      if (!exec_tmp_table->group && !exec_tmp_table->is_distinct) {
+        // 1st tmp table were materializing join result
+        materialize_join = true;
+        explain_flags.set(ESC_BUFFER_RESULT, ESP_USING_TMPTABLE);
+      }
+      curr_tmp_table++;
+      tmp_tables++;
+      trace_this_tbl.add("adding_tmp_table_in_plan_at_position", curr_tmp_table)
+          .add_alnum("cause", "sorting_to_make_groups");
+
+      /* group data to new table */
+      /*
+        If the access method is loose index scan then all MIN/MAX
+        functions are precomputed, and should be treated as regular
+        functions. See extended comment above.
+      */
+      if (qep_tab[0].quick() && qep_tab[0].quick()->is_loose_index_scan())
+        tmp_table_param->precomputed_group_by = true;
+
+      ORDER_with_src dummy = NULL;
+
+      if (create_intermediate_table(&qep_tab[curr_tmp_table], curr_all_fields,
+                                    dummy, true))
+        DBUG_RETURN(true);
+
+      if (group_list) {
+        explain_flags.set(group_list.src, ESP_USING_TMPTABLE);
+        if (!plan_is_const())  // No need to sort a single row
+        {
+          if (add_sorting_to_table(curr_tmp_table - 1, &group_list))
+            DBUG_RETURN(true);
+          pq_last_sort_idx= curr_tmp_table - 1;
+          pq_rebuilt_group= true;
+        }
+
+        if (make_group_fields(this, this)) DBUG_RETURN(true);
+      }
+
+      // Setup sum funcs only when necessary, otherwise we might break info
+      // for the first table
+      if (group_list || tmp_table_param->sum_func_count) {
+        if (make_sum_func_list(*curr_all_fields, *curr_fields_list, true, true))
+          DBUG_RETURN(true);
+        const bool need_distinct =
+            !(qep_tab[0].quick() &&
+              qep_tab[0].quick()->is_agg_loose_index_scan());
+        if (prepare_sum_aggregators(sum_funcs, need_distinct))
+          DBUG_RETURN(true);
+        group_list = NULL;
+        if (setup_sum_funcs(thd, sum_funcs)) DBUG_RETURN(true);
+      }
+
+      /*
+        Allocate a slice of ref items that describe the items to be copied
+        from the second temporary table.
+      */
+      if (alloc_ref_item_slice(thd, REF_SLICE_TMP2)) DBUG_RETURN(true);
+
+      // No sum funcs anymore
+      if (change_to_use_tmp_fields(
+              tmp_all_fields[REF_SLICE_TMP1], fields_list.size(), thd,
+              ref_items[REF_SLICE_TMP2], &tmp_fields_list[REF_SLICE_TMP2],
+              &tmp_all_fields[REF_SLICE_TMP2]))
+        DBUG_RETURN(true);
+
+      curr_fields_list = &tmp_fields_list[REF_SLICE_TMP2];
+      curr_all_fields = &tmp_all_fields[REF_SLICE_TMP2];
+      set_ref_item_slice(REF_SLICE_TMP2);
+      qep_tab[curr_tmp_table].ref_item_slice = REF_SLICE_TMP2;
+      setup_tmptable_write_func(&qep_tab[curr_tmp_table], &trace_this_tbl);
+      //last_slice_before_windowing = REF_SLICE_TMP2;
+    }
+    if (qep_tab[curr_tmp_table].table()->is_distinct)
+      select_distinct = false; /* Each row is unique */
+
+    if (select_distinct && !group_list && !m_windowing_steps) {
+      if (having_cond) {
+        qep_tab[curr_tmp_table].having = having_cond;
+        having_cond->update_used_tables();
+        having_cond = NULL;
+      }
+      qep_tab[curr_tmp_table].needs_duplicate_removal = true;
+      trace_this_tbl.add("reading_from_table_eliminates_duplicates", true);
+      explain_flags.set(ESC_DISTINCT, ESP_DUPS_REMOVAL);
+      select_distinct = false;
+    }
+    /* Clean tmp_table_param for the next tmp table. */
+    tmp_table_param->field_count = tmp_table_param->sum_func_count =
+        tmp_table_param->func_count = 0;
+
+    tmp_table_param->cleanup();
+    streaming_aggregation = false;
+
+    if (!group_optimized_away) {
+      grouped = false;
+    } else {
+      /*
+        If grouping has been optimized away, a temporary table is
+        normally not needed unless we're explicitly requested to create
+        one (e.g. due to a SQL_BUFFER_RESULT hint or INSERT ... SELECT or
+        there is a windowing function that needs sorting).
+
+        In this case (grouping was optimized away), temp_table was
+        created without a grouping expression and JOIN::exec() will not
+        perform the necessary grouping (by the use of end_send_group()
+        or end_write_group()) if JOIN::group is set to false.
+      */
+      /*
+         The temporary table was explicitly requested or there is a window
+         function which needs sorting (check need_tmp_before_win in
+         JOIN::optimize).
+      */
+      DBUG_ASSERT(select_lex->active_options() & OPTION_BUFFER_RESULT ||
+                  m_windowing_steps);
+      // the temporary table does not have a grouping expression
+      DBUG_ASSERT(!qep_tab[curr_tmp_table].table()->group);
+    }
+    calc_group_buffer(this, group_list);
+    count_field_types(select_lex, tmp_table_param, *curr_all_fields, false,
+                      false);
+  }
+// ======================================
+  /*
+    Set up structures for a temporary table but do not actually create
+    the temporary table if one of these conditions are true:
+    - The query is implicitly grouped.
+    - The query is explicitly grouped and
+        + implemented as a simple grouping, or
+        + LIMIT 1 is specified, or
+        + ROLLUP is specified, or
+        + <some unknown condition>.
+  */
+
+  if ((grouped || implicit_grouping) && !m_windowing_steps) {
+    if (make_group_fields(this, this)) DBUG_RETURN(true);
+
+    // "save" slice of ref_items array is needed due to overwriting strategy.
+    if (ref_items[REF_SLICE_SAVED_BASE].is_null()) {
+      if (alloc_ref_item_slice(thd, REF_SLICE_SAVED_BASE)) DBUG_RETURN(true);
+
+      copy_ref_item_slice(REF_SLICE_SAVED_BASE, REF_SLICE_ACTIVE);
+      current_ref_item_slice = REF_SLICE_SAVED_BASE;
+    }
+
+    /*
+      Allocate a slice of ref items that describe the items to be copied
+      from the record buffer for this temporary table.
+    */
+    if (alloc_ref_item_slice(thd, REF_SLICE_ORDERED_GROUP_BY))
+      DBUG_RETURN(true);
+    setup_copy_fields(*curr_all_fields, curr_fields_list->size(), thd,
+                      tmp_table_param, ref_items[REF_SLICE_ORDERED_GROUP_BY],
+                      &tmp_fields_list[REF_SLICE_ORDERED_GROUP_BY],
+                      &tmp_all_fields[REF_SLICE_ORDERED_GROUP_BY]);
+
+    curr_fields_list = &tmp_fields_list[REF_SLICE_ORDERED_GROUP_BY];
+    curr_all_fields = &tmp_all_fields[REF_SLICE_ORDERED_GROUP_BY];
+
+    if (qep_tab)  // remember when to switch to REF_SLICE_ORDERED_GROUP_BY in
+                  // execution
+      ref_slice_immediately_before_group_by =
+          &qep_tab[primary_tables + tmp_tables - 1];
+    /*
+      make_sum_func_list() calls rollup_make_fields() which needs the slice
+      TMP3 in input; indeed it compares *curr_all_fields (i.e. the fields_list
+      of TMP3) with the GROUP BY list (to know which Item of the SELECT list
+      should be set to NULL) so this GROUP BY had better point to the items in
+      TMP3 for the comparison to work:
+    */
+    uint save_sliceno = current_ref_item_slice;
+    set_ref_item_slice(REF_SLICE_ORDERED_GROUP_BY);
+    if (make_sum_func_list(*curr_all_fields, *curr_fields_list, true, true))
+      DBUG_RETURN(true);
+    /*
+      Exit the TMP3 slice, to set up sum funcs, as they take input from
+      previous table, not from that slice.
+    */
+    set_ref_item_slice(save_sliceno);
+    const bool need_distinct = !(qep_tab && qep_tab[0].quick() &&
+                                 qep_tab[0].quick()->is_agg_loose_index_scan());
+    if (prepare_sum_aggregators(sum_funcs, need_distinct)) DBUG_RETURN(true);
+    if (setup_sum_funcs(thd, sum_funcs) || thd->is_fatal_error())
+      DBUG_RETURN(true);
+    // And now set it as input for next phases:
+    set_ref_item_slice(REF_SLICE_ORDERED_GROUP_BY);
+  }
+
+  if (qep_tab && (group_list || (order && !m_windowing_steps /* [1] */))) {
+    /*
+      [1] above: too early to do query ORDER BY if we have windowing; must
+      wait till after window processing.
+    */
+    /* call from pq_tmp_table_info, join->join_tab/join->best_ref is null */
+    // ASSERT_BEST_REF_IN_JOIN_ORDER(this);
+    DBUG_PRINT("info", ("Sorting for send_result_set_metadata"));
+    /*
+      If we have already done the group, add HAVING to sorted table except
+      when rollup is present
+    */
+    if (having_cond && !group_list && !streaming_aggregation &&
+        rollup.state == ROLLUP::STATE_NONE) {
+      if (add_having_as_tmp_table_cond(curr_tmp_table)) DBUG_RETURN(true);
+    }
+
+    if (grouped)
+      m_select_limit = HA_POS_ERROR;
+    else if (!need_tmp_before_win) {
+      /*
+        We can abort sorting after thd->select_limit rows if there are no
+        filter conditions for any tables after the sorted one.
+        Filter conditions come in several forms:
+         1. as a condition item attached to the join_tab, or
+         2. as a keyuse attached to the join_tab (ref access).
+      */
+      for (i = const_tables + 1; i < primary_tables; i++) {
+        QEP_TAB *const local_tab = qep_tab + i;
+        if (local_tab->condition() ||  // 1
+            (best_ref[tab->idx()]->keyuse() &&
+             local_tab->first_inner() == NO_PLAN_IDX))  // 2
+        {
+          /* We have to sort all rows */
+          m_select_limit = HA_POS_ERROR;
+          break;
+        }
+      }
+    }
+    /*
+      Here we add sorting stage for ORDER BY/GROUP BY clause, if the
+      optimiser chose FILESORT to be faster than INDEX SCAN or there is
+      no suitable index present.
+      OPTION_FOUND_ROWS supersedes LIMIT and is taken into account.
+    */
+    DBUG_PRINT("info", ("Sorting for order by/group by"));
+    ORDER_with_src order_arg = group_list ? group_list : order;
+    if (qep_tab &&
+        m_ordered_index_usage !=
+        (group_list ? ORDERED_INDEX_GROUP_BY : ORDERED_INDEX_ORDER_BY) &&
+        // Windowing will change order, so it's too early to sort here
+        !m_windowing_steps) {
+      // Sort either first non-const table or the last tmp table
+      QEP_TAB *const sort_tab = &qep_tab[curr_tmp_table];
+      if (need_tmp_before_win && !materialize_join && !exec_tmp_table->group)
+        explain_flags.set(order_arg.src, ESP_USING_TMPTABLE);
+
+      if (add_sorting_to_table(curr_tmp_table, &order_arg, pq_stable_sort))
+        DBUG_RETURN(true);
+      /*
+        filesort_limit:	 Return only this many rows from filesort().
+        We can use select_limit_cnt only if we have no group_by and 1 table.
+        This allows us to use Bounded_queue for queries like:
+          "select * from t1 order by b desc limit 1;"
+        m_select_limit == HA_POS_ERROR (we need a full table scan)
+        unit->select_limit_cnt == 1 (we only need one row in the result set)
+      */
+
+      pq_last_sort_idx = curr_tmp_table;
+      if (sort_tab->filesort) {
+        sort_tab->filesort->limit =
+            (has_group_by || (primary_tables > curr_tmp_table + 1) ||
+            calc_found_rows)
+            ? m_select_limit
+            : unit->select_limit_cnt;
+      }
+    }
+  }
+  fields = curr_fields_list;
+  fields_it.init(*fields);
+  for (i = 0, tmp_item = fields_it++; tmp_item; i++, tmp_item = fields_it++) {
+    if ((tmp_item->type() == Item::FIELD_ITEM || tmp_item->type() == Item::DEFAULT_VALUE_ITEM) &&
+            saved_join_fields[i] && saved_join_fields[i]->orig_table) {
+      (down_cast<Item_field *>(tmp_item))->field->orig_table = saved_join_fields[i]->orig_table;
+    } 
+  }
+  
+  // Reset before execution
+  set_ref_item_slice(REF_SLICE_SAVED_BASE);
+  if (qep_tab) {
+     qep_tab[primary_tables + tmp_tables].op_type =
+        get_end_select_func();
+  }
+  grouped = has_group_by;
+
+  unplug_join_tabs();
+
+  /*
+    Tmp tables are a layer between the nested loop and the derived table's
+    result, WITH RECURSIVE cannot work with them. This should not happen, as a
+    recursive query cannot have clauses which use a tmp table (GROUP BY,
+    etc).
+  */
+  DBUG_ASSERT(!select_lex->is_recursive() || !tmp_tables);
+  DBUG_RETURN(false);
+
+  if (table != NULL) {
+    free_tmp_table(thd, table);
+    tab->set_table(NULL);
+  }
+  DBUG_RETURN(true);
+}
+
 /**
   Init tmp tables usage info.
 
@@ -4329,7 +5083,7 @@ bool JOIN::make_tmp_tables_info() {
   */
   if (qep_tab && qep_tab[0].quick() &&
       qep_tab[0].quick()->is_loose_index_scan())
-    tmp_table_param.precomputed_group_by =
+    tmp_table_param->precomputed_group_by =
         !qep_tab[0].quick()->is_agg_loose_index_scan();
 
   uint last_slice_before_windowing = REF_SLICE_ACTIVE;
@@ -4360,7 +5114,7 @@ bool JOIN::make_tmp_tables_info() {
     /*
       Create temporary table for use in a single execution.
       (Will be reused if this is a subquery that is executed several times
-       for one execution of the statement)
+       for one execution of the statement pq_sorting_table_idx = curr_tmp_table;)
       Don't use tmp table grouping for json aggregate funcs as it's
       very ineffective.
     */
@@ -4368,7 +5122,7 @@ bool JOIN::make_tmp_tables_info() {
     if (!simple_group && !(test_flags & TEST_NO_KEY_GROUP) && !with_json_agg)
       tmp_group = group_list;
 
-    tmp_table_param.hidden_field_count =
+    tmp_table_param->hidden_field_count =
         all_fields.elements - fields_list.elements;
 
     if (create_intermediate_table(&qep_tab[curr_tmp_table], &all_fields,
@@ -4385,10 +5139,10 @@ bool JOIN::make_tmp_tables_info() {
       sorted access even if final result is not to be sorted.
     */
     DBUG_ASSERT(
+        thd->parallel_exec ||
         !(m_ordered_index_usage == ORDERED_INDEX_VOID && !plan_is_const() &&
           qep_tab[const_tables].position()->sj_strategy != SJ_OPT_LOOSE_SCAN &&
           qep_tab[const_tables].use_order()));
-
     /*
       Allocate a slice of ref items that describe the items to be copied
       from the first temporary table.
@@ -4397,7 +5151,7 @@ bool JOIN::make_tmp_tables_info() {
 
     // Change sum_fields reference to calculated fields in tmp_table
     if (streaming_aggregation || qep_tab[curr_tmp_table].table()->group ||
-        tmp_table_param.precomputed_group_by) {
+        tmp_table_param->precomputed_group_by) {
       if (change_to_use_tmp_fields(all_fields, fields_list.size(), thd,
                                    ref_items[REF_SLICE_TMP1],
                                    &tmp_fields_list[REF_SLICE_TMP1],
@@ -4417,6 +5171,7 @@ bool JOIN::make_tmp_tables_info() {
     qep_tab[curr_tmp_table].ref_item_slice = REF_SLICE_TMP1;
     setup_tmptable_write_func(&qep_tab[curr_tmp_table], &trace_this_outer);
     last_slice_before_windowing = REF_SLICE_TMP1;
+    last_slice_before_pq = REF_SLICE_TMP1;
 
     if (rollup.state == ROLLUP::STATE_READY)
       switch_slice_for_rollup_fields(*curr_all_fields, *curr_fields_list);
@@ -4450,11 +5205,11 @@ bool JOIN::make_tmp_tables_info() {
       having_cond = nullptr;  // Already done
     }
 
-    tmp_table_param.func_count = 0;
+    tmp_table_param->func_count = 0;
 
     if (streaming_aggregation || qep_tab[curr_tmp_table].table()->group) {
-      tmp_table_param.field_count += tmp_table_param.sum_func_count;
-      tmp_table_param.sum_func_count = 0;
+      tmp_table_param->field_count += tmp_table_param->sum_func_count;
+      tmp_table_param->sum_func_count = 0;
     }
 
     if (exec_tmp_table->group) {  // Already grouped
@@ -4483,15 +5238,15 @@ bool JOIN::make_tmp_tables_info() {
     if ((group_list &&
          (!test_if_subpart(group_list, order) || select_distinct ||
           m_windowing_steps || rollup.state != ROLLUP::STATE_NONE)) ||
-        (select_distinct && (tmp_table_param.using_outer_summary_function ||
+        (select_distinct && (tmp_table_param->using_outer_summary_function ||
                              rollup.state != ROLLUP::STATE_NONE))) {
       DBUG_PRINT("info", ("Creating group table"));
 
       calc_group_buffer(this, group_list);
-      count_field_types(select_lex, &tmp_table_param,
+      count_field_types(select_lex, tmp_table_param,
                         tmp_all_fields[REF_SLICE_TMP1],
                         select_distinct && !group_list, false);
-      tmp_table_param.hidden_field_count =
+      tmp_table_param->hidden_field_count =
           tmp_all_fields[REF_SLICE_TMP1].elements -
           tmp_fields_list[REF_SLICE_TMP1].elements;
       streaming_aggregation = false;
@@ -4513,7 +5268,7 @@ bool JOIN::make_tmp_tables_info() {
         functions. See extended comment above.
       */
       if (qep_tab[0].quick() && qep_tab[0].quick()->is_loose_index_scan())
-        tmp_table_param.precomputed_group_by = true;
+        tmp_table_param->precomputed_group_by = true;
 
       ORDER_with_src dummy = nullptr;  // TODO can use table->group here also
 
@@ -4534,7 +5289,7 @@ bool JOIN::make_tmp_tables_info() {
 
       // Setup sum funcs only when necessary, otherwise we might break info
       // for the first table
-      if (group_list || tmp_table_param.sum_func_count) {
+      if (group_list || tmp_table_param->sum_func_count) {
         if (make_sum_func_list(*curr_all_fields, *curr_fields_list, true, true))
           return true;
         const bool need_distinct =
@@ -4564,6 +5319,7 @@ bool JOIN::make_tmp_tables_info() {
       qep_tab[curr_tmp_table].ref_item_slice = REF_SLICE_TMP2;
       setup_tmptable_write_func(&qep_tab[curr_tmp_table], &trace_this_tbl);
       last_slice_before_windowing = REF_SLICE_TMP2;
+      last_slice_before_pq = REF_SLICE_TMP2;
     }
     if (qep_tab[curr_tmp_table].table()->is_distinct)
       select_distinct = false; /* Each row is unique */
@@ -4580,10 +5336,10 @@ bool JOIN::make_tmp_tables_info() {
       select_distinct = false;
     }
     /* Clean tmp_table_param for the next tmp table. */
-    tmp_table_param.field_count = tmp_table_param.sum_func_count =
-        tmp_table_param.func_count = 0;
+    tmp_table_param->field_count = tmp_table_param->sum_func_count =
+        tmp_table_param->func_count = 0;
 
-    tmp_table_param.cleanup();
+    tmp_table_param->cleanup();
     streaming_aggregation = false;
 
     if (!group_optimized_away) {
@@ -4611,7 +5367,7 @@ bool JOIN::make_tmp_tables_info() {
       DBUG_ASSERT(!qep_tab[curr_tmp_table].table()->group);
     }
     calc_group_buffer(this, group_list);
-    count_field_types(select_lex, &tmp_table_param, *curr_all_fields, false,
+    count_field_types(select_lex, tmp_table_param, *curr_all_fields, false,
                       false);
   }
 
@@ -4643,13 +5399,14 @@ bool JOIN::make_tmp_tables_info() {
     */
     if (alloc_ref_item_slice(thd, REF_SLICE_ORDERED_GROUP_BY)) return true;
     setup_copy_fields(*curr_all_fields, curr_fields_list->size(), thd,
-                      &tmp_table_param, ref_items[REF_SLICE_ORDERED_GROUP_BY],
+                      tmp_table_param, ref_items[REF_SLICE_ORDERED_GROUP_BY],
                       &tmp_fields_list[REF_SLICE_ORDERED_GROUP_BY],
                       &tmp_all_fields[REF_SLICE_ORDERED_GROUP_BY]);
 
     curr_fields_list = &tmp_fields_list[REF_SLICE_ORDERED_GROUP_BY];
     curr_all_fields = &tmp_all_fields[REF_SLICE_ORDERED_GROUP_BY];
     last_slice_before_windowing = REF_SLICE_ORDERED_GROUP_BY;
+    last_slice_before_pq = REF_SLICE_ORDERED_GROUP_BY;
 
     if (qep_tab)  // remember when to switch to REF_SLICE_ORDERED_GROUP_BY in
                   // execution
@@ -4708,7 +5465,7 @@ bool JOIN::make_tmp_tables_info() {
       for (uint i = const_tables + 1; i < primary_tables; i++) {
         QEP_TAB *const tab = qep_tab + i;
         if (tab->condition() ||  // 1
-            (best_ref[tab->idx()]->keyuse() &&
+            (best_ref && best_ref[tab->idx()]->keyuse() &&
              tab->first_inner() == NO_PLAN_IDX))  // 2
         {
           /* We have to sort all rows */
@@ -4735,7 +5492,8 @@ bool JOIN::make_tmp_tables_info() {
       if (need_tmp_before_win && !materialize_join && !exec_tmp_table->group)
         explain_flags.set(order_arg.src, ESP_USING_TMPTABLE);
 
-      if (add_sorting_to_table(curr_tmp_table, &order_arg)) return true;
+      if (add_sorting_to_table(curr_tmp_table, &order_arg, pq_stable_sort))
+        return true;
       /*
         filesort_limit:	 Return only this many rows from filesort().
         We can use select_limit_cnt only if we have no group_by and 1 table.
@@ -4744,18 +5502,19 @@ bool JOIN::make_tmp_tables_info() {
         m_select_limit == HA_POS_ERROR (we need a full table scan)
         unit->select_limit_cnt == 1 (we only need one row in the result set)
       */
-      if (sort_tab->filesort)
-        sort_tab->filesort->limit =
-            (has_group_by || (primary_tables > curr_tmp_table + 1) ||
-             calc_found_rows)
-                ? m_select_limit
-                : unit->select_limit_cnt;
+
+      pq_last_sort_idx = curr_tmp_table;
+      sort_tab->filesort->limit =
+          (has_group_by || (primary_tables > curr_tmp_table + 1) ||
+           calc_found_rows)
+          ? m_select_limit
+          : unit->select_limit_cnt;
     }
   }
 
   if (qep_tab && m_windowing_steps) {
     for (uint wno = 0; wno < m_windows.elements; wno++) {
-      tmp_table_param.m_window = m_windows[wno];
+      tmp_table_param->m_window = m_windows[wno];
 
       if (!tmp_tables) {
         curr_tmp_table = primary_tables;
@@ -4782,13 +5541,13 @@ bool JOIN::make_tmp_tables_info() {
       ORDER_with_src dummy = nullptr;
 
       if (last_slice_before_windowing == REF_SLICE_ACTIVE) {
-        tmp_table_param.hidden_field_count =
+        tmp_table_param->hidden_field_count =
             all_fields.elements - fields_list.elements;
       } else {
         DBUG_ASSERT(tmp_tables >= 1 &&
                     last_slice_before_windowing > REF_SLICE_ACTIVE);
 
-        tmp_table_param.hidden_field_count =
+        tmp_table_param->hidden_field_count =
             tmp_all_fields[last_slice_before_windowing].elements -
             tmp_fields_list[last_slice_before_windowing].elements;
       }
@@ -4812,7 +5571,7 @@ bool JOIN::make_tmp_tables_info() {
           buffering.
         */
         Temp_table_param *par =
-            new (thd->mem_root) Temp_table_param(tmp_table_param);
+            new (thd->mem_root) Temp_table_param(*tmp_table_param);
         par->m_window_frame_buffer = true;
         List<Item> tmplist(*curr_all_fields, thd->mem_root);
         TABLE *table =
@@ -4918,6 +5677,11 @@ bool JOIN::make_tmp_tables_info() {
 }
 
 void JOIN::unplug_join_tabs() {
+
+  // clone JOIN info from pq_tmp_tables_info, best_ref == NULL
+  if (tables != 0 && !(best_ref && !join_tab))
+    return;
+
   ASSERT_BEST_REF_IN_JOIN_ORDER(this);
 
   /*
@@ -4958,7 +5722,7 @@ void JOIN::unplug_join_tabs() {
 */
 
 bool JOIN::add_sorting_to_table(uint idx, ORDER_with_src *sort_order,
-                                bool force_stable_sort) {
+                                bool force_stab_output) {
   DBUG_TRACE;
   ASSERT_BEST_REF_IN_JOIN_ORDER(this);
   DBUG_ASSERT(!select_lex->is_recursive());
@@ -5003,7 +5767,7 @@ bool JOIN::add_sorting_to_table(uint idx, ORDER_with_src *sort_order,
     Switch_ref_item_slice slice_switch(this, tab->ref_item_slice);
     tab->filesort = new (thd->mem_root)
         Filesort(thd, tab->table(), keep_buffers, *sort_order, HA_POS_ERROR,
-                 force_stable_sort,
+                 force_stab_output,
                  /*remove_duplicates=*/false, force_sort_position);
     tab->filesort_pushed_order = sort_order->order;
   }

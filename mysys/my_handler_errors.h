@@ -123,6 +123,7 @@ static const char *handler_error_messages[] = {
     "Invalid table name",
     "Path is too long for the OS",
     "Histogram sampling initialization failed",
+    "Complete scan all Parallel Query ranges"
 };
 
 extern void my_handler_error_register(void);

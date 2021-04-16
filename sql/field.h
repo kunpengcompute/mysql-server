@@ -103,9 +103,10 @@ class Relay_log_info;
 class Send_field;
 class THD;
 class my_decimal;
+class Item_sum;
 struct TYPELIB;
 struct timeval;
-
+struct Field_raw_data;
 using Mysql::Nullable;
 
 /*
@@ -787,6 +788,7 @@ class Field {
   */
   TABLE *table;             // Pointer for table
   const TABLE *orig_table;  // Pointer to original table
+  Item_sum *item_sum_ref {nullptr};
   const char **table_name, *field_name;
   LEX_CSTRING comment;
   /* Field is part of the following keys */
@@ -834,6 +836,7 @@ class Field {
   // Length of field. Never write to this member directly; instead, use
   // set_field_length().
   uint32 field_length;
+  uint32 extra_length {0};
   virtual void set_field_length(uint32 length) { field_length = length; }
 
   uint32 flags;
@@ -989,6 +992,8 @@ class Field {
     return store(nr, false);
   }
   virtual type_conversion_status store_decimal(const my_decimal *d) = 0;
+
+  virtual type_conversion_status store_extra(const uchar *, size_t);
   /**
     Store MYSQL_TIME value with the given amount of decimal digits
     into a field.
@@ -2154,6 +2159,7 @@ class Field_new_decimal : public Field_num {
     is.
   */
   bool m_keep_precision{false};
+  ulonglong* m_result_count_ptr{nullptr};
   int do_save_field_metadata(uchar *first_byte) const final override;
 
  public:
@@ -2200,7 +2206,7 @@ class Field_new_decimal : public Field_num {
   bool zero_pack() const final override { return false; }
   void sql_type(String &str) const final override;
   uint32 max_display_length() const final override { return field_length; }
-  uint32 pack_length() const final override { return (uint32)bin_size; }
+  uint32 pack_length() const final override { return (uint32)(bin_size + extra_length); }
   uint pack_length_from_metadata(uint field_metadata) const final override;
   uint row_pack_length() const final override { return pack_length(); }
   bool compatible_field_size(uint field_metadata, Relay_log_info *, uint16,
@@ -2212,7 +2218,7 @@ class Field_new_decimal : public Field_num {
   }
   const uchar *unpack(uchar *to, const uchar *from, uint param_data,
                       bool low_byte_first) final override;
-  static Field *create_from_item(const Item *item);
+  static Field *create_from_item(const Item *item, MEM_ROOT *root=nullptr);
   bool send_to_protocol(Protocol *protocol) const final override;
   void set_keep_precision(bool arg) { m_keep_precision = arg; }
 };
@@ -2587,7 +2593,7 @@ class Field_double final : public Field_real {
   bool send_to_protocol(Protocol *protocol) const final override;
   int cmp(const uchar *, const uchar *) const final override;
   size_t make_sort_key(uchar *buff, size_t length) const final override;
-  uint32 pack_length() const final override { return sizeof(double); }
+  uint32 pack_length() const final override { return sizeof(double) + extra_length; }
   uint row_pack_length() const final override { return pack_length(); }
   void sql_type(String &str) const final override;
   Field_double *clone(MEM_ROOT *mem_root) const final override {
@@ -4805,6 +4811,7 @@ class Copy_field {
   void set(Field *to, Field *from, bool save);  // Field to field
 
  private:
+  void do_copy_extra(const Field *, Field *);
   void (*m_do_copy)(Copy_field *, const Field *, Field *);
   void (*m_do_copy2)(Copy_field *, const Field *,
                      Field *);  // Used to handle null values
@@ -4902,4 +4909,12 @@ const char *get_field_name_or_expression(THD *thd, const Field *field);
 */
 bool pre_validate_value_generator_expr(Item *expression, const char *name,
                                        Value_generator_source source);
+// build field raw data from Field
+extern uint32 pq_build_field_raw(Field *field, Field_raw_data *field_raw);
+
+extern void pq_build_mq_fields(Field *field, Field_raw_data *field_raw,
+                            bool *null_array, int &null_num, uint32 &total_bytes);
+
+extern void pq_build_mq_item(Item *item, Field_raw_data *field_raw,
+                            bool *null_array, int &null_num, uint32 &total_bytes);
 #endif /* FIELD_INCLUDED */

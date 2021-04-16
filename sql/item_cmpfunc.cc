@@ -606,6 +606,7 @@ static bool convert_constant_item(THD *thd, Item_field *field_item, Item **item,
     if (table)
       dbug_tmp_restore_column_maps(table->read_set, table->write_set, old_maps);
   }
+
   return false;
 }
 
@@ -6409,6 +6410,7 @@ bool Item_equal::fix_fields(THD *thd, Item **) {
   Item *item;
   not_null_tables_cache = used_tables_cache = 0;
   while ((item = li++)) {
+    if (!item->fixed && item->fix_fields(thd, &item)) return true;
     used_tables_cache |= item->used_tables();
     not_null_tables_cache |= item->not_null_tables();
     maybe_null |= item->maybe_null;

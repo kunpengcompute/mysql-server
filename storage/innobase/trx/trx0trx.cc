@@ -2160,6 +2160,18 @@ ReadView *trx_assign_read_view(trx_t *trx) /*!< in/out: active transaction */
   return (trx->read_view);
 }
 
+ReadView *trx_clone_read_view(trx_t *trx, ReadView *snapshot) /*!< in/out: active transaction */
+{
+  trx->read_view = UT_NEW_NOKEY(ReadView());
+  if (trx->read_view != nullptr) {
+    trx->read_view->Copy_readView(*snapshot);
+    trx->read_view->skip_view_list = true;
+  }
+  return (trx->read_view);
+}
+
+
+
 /** Prepares a transaction for commit/rollback. */
 void trx_commit_or_rollback_prepare(trx_t *trx) /*!< in/out: transaction */
 {

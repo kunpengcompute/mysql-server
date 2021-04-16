@@ -203,6 +203,19 @@ class Key_use {
         fanout(0.0),
         read_cost(0.0) {}
 
+  Key_use *pq_clone(THD *thd) {
+    Key_use *new_key_use = new (thd->pq_mem_root) Key_use(
+        nullptr, nullptr, used_tables, key, keypart, optimize, keypart_map,
+        ref_table_rows, null_rejecting, cond_guard, sj_pred_no);
+    if (new_key_use != nullptr) {
+      new_key_use->bound_keyparts = bound_keyparts;
+      new_key_use->fanout = fanout;
+      new_key_use->read_cost = read_cost;
+    }
+    return new_key_use;
+  }
+
+
   TABLE_LIST *table_ref;  ///< table owning the index
 
   /**
@@ -564,6 +577,8 @@ struct POSITION {
     }
     prefix_rowcount *= filter_effect;
   }
+
+  bool pq_copy(THD *thd, POSITION *orig);
 };
 
 /**
@@ -955,5 +970,7 @@ void calc_length_and_keyparts(Key_use *keyuse, JOIN_TAB *tab, const uint key,
 SJ_TMP_TABLE *create_sj_tmp_table(THD *thd, JOIN *join,
                                   SJ_TMP_TABLE_TAB *first_tab,
                                   SJ_TMP_TABLE_TAB *last_tab);
-
+store_key *get_store_key(THD *thd, Key_use *keyuse,
+                         table_map used_tables, KEY_PART_INFO *key_part,
+                         uchar *key_buff, uint maybe_null);
 #endif /* SQL_SELECT_INCLUDED */

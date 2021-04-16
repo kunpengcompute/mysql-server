@@ -54,15 +54,15 @@ count(*)
 select sum(a) from t1;
 sum(a)
 6144
-select sum(a) from t1 group by b;
+select sum(a) from t1 group by b order by b;
 sum(a)
+2048
 1536
-2048
 2560
-select sum(a) + sum(b) from t1 group by b;
+select sum(a) + sum(b) from t1 group by b order by b;
 sum(a) + sum(b)
-2048
 NULL
+2048
 4608
 select max(x) from (select sum(a) as x from t1 group by b) as teeone;
 max(x)
@@ -95,8 +95,8 @@ b int
 18	#	insert into t1 select * from t1
 19	#	select count(*) from t1
 20	#	select sum(a) from t1
-21	#	select sum(a) from t1 group by b
-22	#	select sum(a) + sum(b) from t1 group by b
+21	#	select sum(a) from t1 group by b order by b
+22	#	select sum(a) + sum(b) from t1 group by b order by b
 23	#	select max(x) from (select sum(a) as x from t1 group by b) as teeone
 24	#	select '0123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345
 show profile for query 15;
@@ -144,8 +144,8 @@ Query_ID	Duration	Query
 18	#	insert into t1 select * from t1
 19	#	select count(*) from t1
 20	#	select sum(a) from t1
-21	#	select sum(a) from t1 group by b
-22	#	select sum(a) + sum(b) from t1 group by b
+21	#	select sum(a) from t1 group by b order by b
+22	#	select sum(a) + sum(b) from t1 group by b order by b
 23	#	select max(x) from (select sum(a) as x from t1 group by b) as teeone
 24	#	select '0123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345
 25	#	select * from information_schema.profiling
@@ -180,8 +180,8 @@ Query_ID	Duration	Query
 18	#	insert into t1 select * from t1
 19	#	select count(*) from t1
 20	#	select sum(a) from t1
-21	#	select sum(a) from t1 group by b
-22	#	select sum(a) + sum(b) from t1 group by b
+21	#	select sum(a) from t1 group by b order by b
+22	#	select sum(a) + sum(b) from t1 group by b order by b
 23	#	select max(x) from (select sum(a) as x from t1 group by b) as teeone
 24	#	select '0123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345
 25	#	select * from information_schema.profiling
@@ -220,8 +220,8 @@ Query_ID	Duration	Query
 18	#	insert into t1 select * from t1
 19	#	select count(*) from t1
 20	#	select sum(a) from t1
-21	#	select sum(a) from t1 group by b
-22	#	select sum(a) + sum(b) from t1 group by b
+21	#	select sum(a) from t1 group by b order by b
+22	#	select sum(a) + sum(b) from t1 group by b order by b
 23	#	select max(x) from (select sum(a) as x from t1 group by b) as teeone
 24	#	select '0123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345
 25	#	select * from information_schema.profiling
@@ -256,8 +256,8 @@ Query_ID	Duration	Query
 18	#	insert into t1 select * from t1
 19	#	select count(*) from t1
 20	#	select sum(a) from t1
-21	#	select sum(a) from t1 group by b
-22	#	select sum(a) + sum(b) from t1 group by b
+21	#	select sum(a) from t1 group by b order by b
+22	#	select sum(a) + sum(b) from t1 group by b order by b
 23	#	select max(x) from (select sum(a) as x from t1 group by b) as teeone
 24	#	select '0123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345678900123456789001234567890012345
 25	#	select * from information_schema.profiling

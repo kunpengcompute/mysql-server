@@ -2648,6 +2648,11 @@ int mysql_execute_command(THD *thd, bool first_level) {
 
   thd->work_part_info = nullptr;
 
+  if (!thd->no_pq && thd->variables.force_parallel_execute && !thd->pq_dop) {
+    thd->pq_dop = thd->variables.parallel_default_dop;
+    thd->m_suite_for_pq = true;
+  }
+
   /*
     Each statement or replication event which might produce deadlock
     should handle transaction rollback on its own. So by the start of
@@ -4487,6 +4492,8 @@ int mysql_execute_command(THD *thd, bool first_level) {
 
       DBUG_ASSERT(lex->m_sql_cmd != nullptr);
       res = lex->m_sql_cmd->execute(thd);
+      thd = current_thd;
+ 
       break;
 
     case SQLCOM_ALTER_USER: {
@@ -5070,6 +5077,7 @@ void THD::reset_for_next_command() {
   thd->query_start_usec_used = false;
   thd->m_is_fatal_error = false;
   thd->time_zone_used = false;
+
   /*
     Clear the status flag that are expected to be cleared at the
     beginning of each SQL statement.
@@ -5128,6 +5136,9 @@ void THD::reset_for_next_command() {
     a grant/revoke or flush.
   */
   thd->security_context()->checkout_access_maps();
+
+  thd->parallel_exec= false;
+
 #ifndef DBUG_OFF
   thd->set_tmp_table_seq_id(1);
 #endif
@@ -5304,7 +5315,8 @@ void mysql_parse(THD *thd, Parser_state *parser_state) {
               thd, &src_res_grp, &dest_res_grp, &ticket, &cur_ticket);
 
           error = mysql_execute_command(thd, true);
-
+          thd = current_thd;
+ 
           if (switched)
             mgr_ptr->restore_original_resource_group(thd, src_res_grp,
                                                      dest_res_grp);

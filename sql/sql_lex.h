@@ -298,6 +298,7 @@ class Table_ident {
 
 typedef List<Item> List_item;
 typedef Mem_root_array<ORDER *> Group_list_ptrs;
+typedef Mem_root_array<ORDER *> PQ_Group_list_ptrs;
 
 /**
   Structure to hold parameters for CHANGE MASTER, START SLAVE, and STOP SLAVE.
@@ -600,6 +601,17 @@ class SELECT_LEX_UNIT {
   /// The first query block in this query expression.
   SELECT_LEX *slave;
 
+ public :
+  /**
+    An iterator you can read from to get all records for this query.
+
+    May be nullptr even after create_iterators() if the current query
+    is not supported by the iterator executor, or in the case of an
+    unfinished materialization (see optimize()).
+   */
+  unique_ptr_destroy_only<RowIterator> m_root_iterator;
+
+
  private:
   /**
     Marker for subqueries in WHERE, HAVING, ORDER BY, GROUP BY and
@@ -625,15 +637,7 @@ class SELECT_LEX_UNIT {
   /// result table (see optimize()).
   Query_result *m_query_result;
 
-  /**
-    An iterator you can read from to get all records for this query.
-
-    May be nullptr even after create_iterators(), or in the case of an
-    unfinished materialization (see optimize()).
-   */
-  unique_ptr_destroy_only<RowIterator> m_root_iterator;
-
-  /**
+    /**
     If there is an unfinished materialization (see optimize()),
     contains one element for each query block in this query expression.
    */
@@ -651,6 +655,7 @@ class SELECT_LEX_UNIT {
   Mem_root_array<MaterializeIterator::QueryBlock> setup_materialization(
       THD *thd, TABLE *dst_table, bool union_distinct_only);
 
+ public:
   /**
     If possible, convert the executor structures to a set of row iterators,
     storing the result in m_root_iterator. If not, m_root_iterator will remain
@@ -658,7 +663,6 @@ class SELECT_LEX_UNIT {
    */
   void create_iterators(THD *thd);
 
- public:
   /**
     result of this query can't be cached, bit field, can be :
       UNCACHEABLE_DEPENDENT
@@ -819,6 +823,7 @@ class SELECT_LEX_UNIT {
 
   /// Set new query result object for this query expression
   void set_query_result(Query_result *res) { m_query_result = res; }
+  void set_slave(SELECT_LEX *select_lex) { slave = select_lex; }
 
   /**
     Whether there is a chance that optimize() is capable of materializing
@@ -983,6 +988,7 @@ enum class enum_explain_type {
   EXPLAIN_UNION,
   EXPLAIN_UNION_RESULT,
   EXPLAIN_MATERIALIZED,
+  EXPLAIN_GATHER,
   // Total:
   EXPLAIN_total  ///< fake type, total number of all valid types
 
@@ -1090,14 +1096,15 @@ class SELECT_LEX {
     should not be modified after resolving is done.
   */
   ulonglong m_base_options;
+
+ public:
   /**
-    Active options. Derived from base options, modifiers added during
-    resolving and values from session variable option_bits. Since the latter
-    may change, active options are refreshed per execution of a statement.
+  Active options. Derived from base options, modifiers added during
+  resolving and values from session variable option_bits. Since the latter
+  may change, active options are refreshed per execution of a statement.
   */
   ulonglong m_active_options;
 
- public:
   /**
     result of this query can't be cached, bit field, can be :
       UNCACHEABLE_DEPENDENT
@@ -1263,6 +1270,13 @@ class SELECT_LEX {
   SQL_I_List<ORDER> order_list;
   Group_list_ptrs *order_list_ptrs;
 
+  /*
+  * the backup of group_list/order_list before optimization, which is used
+  * to generate worker's group_list/order_list.
+  */
+  PQ_Group_list_ptrs *saved_group_list_ptrs;
+  PQ_Group_list_ptrs *saved_order_list_ptrs;
+
   /// LIMIT clause, NULL if no limit is given
   Item *select_limit;
   /// LIMIT ... OFFSET clause, NULL if no offset is given
@@ -1421,6 +1435,7 @@ class SELECT_LEX {
   SELECT_LEX *outer_select() const { return master->outer_select(); }
   SELECT_LEX *next_select() const { return next; }
 
+  void set_master_unit(SELECT_LEX_UNIT *unit) { master = unit; }
   /**
     @return true  If STRAIGHT_JOIN applies to all tables.
     @return false Else.
@@ -1887,6 +1902,14 @@ class SELECT_LEX {
 
   bool walk(Item_processor processor, enum_walk walk, uchar *arg);
 
+  bool pq_check_table_list();
+
+  bool suite_for_parallel_query(THD *thd);
+
+  /// Helper for fix_prepare_information()
+  void fix_prepare_information_for_order(THD *thd, SQL_I_List<ORDER> *list,
+                                         Group_list_ptrs **list_ptrs);
+
  private:
   // Delete unused columns from merged derived tables
   void delete_unused_merged_columns(mem_root_deque<TABLE_LIST *> *tables);
@@ -1900,9 +1923,6 @@ class SELECT_LEX {
   */
   bool m_empty_query;
 
-  /// Helper for fix_prepare_information()
-  void fix_prepare_information_for_order(THD *thd, SQL_I_List<ORDER> *list,
-                                         Group_list_ptrs **list_ptrs);
   static const char
       *type_str[static_cast<int>(enum_explain_type::EXPLAIN_total)];
 
@@ -1943,13 +1963,14 @@ class SELECT_LEX {
   }
   bool is_in_select_list(Item *i);
 
- private:
+ public:
   bool setup_wild(THD *thd);
   bool setup_order_final(THD *thd);
   bool setup_group(THD *thd);
   void fix_after_pullout(SELECT_LEX *parent_select, SELECT_LEX *removed_select);
   void remove_redundant_subquery_clauses(THD *thd,
                                          int hidden_group_field_count);
+ private:
   void repoint_contexts_of_join_nests(mem_root_deque<TABLE_LIST *> join_list);
   void empty_order_list(SELECT_LEX *sl);
   bool setup_join_cond(THD *thd, mem_root_deque<TABLE_LIST *> *tables,
@@ -1967,6 +1988,12 @@ class SELECT_LEX {
  public:
   /// How many expressions are part of the order by but not select list.
   int hidden_order_field_count;
+
+  /**
+    Windows function maybe be optimized, so we save this value to determine
+    whether support parallel query.
+  */
+  uint saved_windows_elements;
 
   bool setup_conds(THD *thd);
   bool prepare(THD *thd);
@@ -3534,6 +3561,7 @@ struct LEX : public Query_tables_list {
   void set_ignore(bool ignore_param) { ignore = ignore_param; }
   st_parsing_options parsing_options;
   Alter_info *alter_info;
+  bool in_execute_ps {false};
   /* Prepared statements SQL syntax:*/
   LEX_CSTRING prepared_stmt_name; /* Statement name (in all queries) */
   /*

@@ -146,6 +146,9 @@ enum enum_server_operational_state {
 };
 enum_server_operational_state get_server_state();
 
+extern uint parallel_threads_running;
+extern uint parallel_threads_refused;
+extern uint parallel_memory_refused;
 extern bool opt_large_files, server_id_supplied;
 extern bool opt_bin_log;
 extern bool opt_log_slave_updates;
@@ -481,6 +484,7 @@ extern PSI_thread_key key_thread_one_connection;
 extern PSI_thread_key key_thread_compress_gtid_table;
 extern PSI_thread_key key_thread_parser_service;
 extern PSI_thread_key key_thread_handle_con_admin_sockets;
+extern PSI_thread_key key_thread_parallel_query;
 
 extern PSI_file_key key_file_binlog;
 extern PSI_file_key key_file_binlog_index;

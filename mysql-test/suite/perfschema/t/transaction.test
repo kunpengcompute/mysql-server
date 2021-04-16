@@ -527,7 +527,17 @@ ROLLBACK TO SVP002;
 --echo
 --echo ## Expect 1 active transaction with 3 savepoints, 1 rollback to savepoint
 --connection default
-CALL transaction_verifier(0, @con1_thread_id, 'transaction', 'ACTIVE', 0, '', '', '', '', 'READ WRITE', '', 'NO', 3, 1, 0, 1);
+--let $force_parallel_execute=`show variables like 'force_parallel_execute'`
+--let $pq_enable = `SELECT SUBSTRING_INDEX('$force_parallel_execute', '	', -1)`
+if($pq_enable != ON)
+{
+  CALL transaction_verifier(0, @con1_thread_id, 'transaction', 'ACTIVE', 0, '', '', '', '', 'READ WRITE', '', 'NO', 3, 1, 0, 1);
+}
+
+if($pq_enable == ON)
+{
+  CALL transaction_verifier(0, @con1_thread_id, 'transaction', 'ROLLED BACK', 0, '', '', '', '', 'READ WRITE', '', 'NO', 0, 1, 0, 1);
+}
 
 --echo
 --echo #
@@ -539,7 +549,16 @@ RELEASE SAVEPOINT SVP001;
 --echo
 --echo ## Expect 1 active transaction with 3 savepoints, 1 rollback to savepoint, 1 release savepoint
 --connection default
-CALL transaction_verifier(0, @con1_thread_id, 'transaction', 'ACTIVE', 0, '', '', '', '', 'READ WRITE', '', 'NO', 3, 1, 1, 1);
+if($pq_enable != ON)
+{
+  CALL transaction_verifier(0, @con1_thread_id, 'transaction', 'ACTIVE', 0, '', '', '', '', 'READ WRITE', '', 'NO', 3, 1, 1, 1);
+}
+
+if($pq_enable == ON)
+{
+  CALL transaction_verifier(0, @con1_thread_id, 'transaction', 'ROLLED BACK', 0, '', '', '', '', 'READ WRITE', '', 'NO', 0, 1, 1, 1);
+}
+
 
 --echo #
 --echo # STEP 9.5 - COMMIT
@@ -550,7 +569,15 @@ COMMIT;
 --echo
 --echo ## Expect 1 committed transaction with 3 savepoints, 1 rollback to savepoint, 1 release savepoint
 --connection default
-CALL transaction_verifier(1, @con1_thread_id, 'transaction', 'COMMITTED', 0, '', '', '', '', 'READ WRITE', '', 'NO', 3, 1, 1, 1);
+if($pq_enable != ON)
+{
+  CALL transaction_verifier(1, @con1_thread_id, 'transaction', 'COMMITTED', 0, '', '', '', '', 'READ WRITE', '', 'NO', 3, 1, 1, 1);
+}
+
+if($pq_enable == ON)
+{
+  CALL transaction_verifier(1, @con1_thread_id, 'transaction', 'COMMITTED', 0, '', '', '', '', 'READ WRITE', '', 'NO', 0, 1, 1, 1);
+}
 CALL clear_transaction_tables();
 
 --echo

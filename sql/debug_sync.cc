@@ -938,7 +938,7 @@ static void debug_sync_remove_action(st_debug_sync_control *ds_control,
   uint dsp_idx = static_cast<uint>(action - ds_control->ds_action);
   DBUG_TRACE;
   DBUG_ASSERT(ds_control);
-  DBUG_ASSERT(ds_control == current_thd->debug_sync_control);
+  DBUG_ASSERT(ds_control == current_thd->debug_sync_control || ds_control == current_thd->pq_leader->debug_sync_control); 
   DBUG_ASSERT(action);
   DBUG_ASSERT(dsp_idx < ds_control->ds_active);
 

@@ -810,6 +810,9 @@ struct dtuple_t {
     }
     return (false);
   }
+
+  int compare(const rec_t *rec, const dict_index_t *index, const dict_index_t *index2,
+                           const ulint *offsets);
 };
 
 /** A slot for a field in a big rec vector */

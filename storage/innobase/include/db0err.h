@@ -208,6 +208,7 @@ enum dberr_t {
   DB_END_OF_INDEX,
   DB_END_SAMPLE_READ,
 
+  DB_END_OF_RANGE,    // reach parallel Query range end
   /** Generic error code for "Not found" type of errors */
   DB_NOT_FOUND,
 

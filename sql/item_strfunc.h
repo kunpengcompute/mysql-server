@@ -198,6 +198,8 @@ class Item_func_md5 final : public Item_str_ascii_func {
   String *val_str_ascii(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "md5"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_sha : public Item_str_ascii_func {
@@ -206,6 +208,8 @@ class Item_func_sha : public Item_str_ascii_func {
   String *val_str_ascii(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "sha"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_sha2 : public Item_str_ascii_func {
@@ -215,6 +219,8 @@ class Item_func_sha2 : public Item_str_ascii_func {
   String *val_str_ascii(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "sha2"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_to_base64 final : public Item_str_ascii_func {
@@ -225,6 +231,9 @@ class Item_func_to_base64 final : public Item_str_ascii_func {
   String *val_str_ascii(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "to_base64"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
+
 };
 
 class Item_func_statement_digest final : public Item_str_ascii_func {
@@ -283,6 +292,8 @@ class Item_func_from_base64 final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "from_base64"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_aes_encrypt final : public Item_str_func {
@@ -299,6 +310,8 @@ class Item_func_aes_encrypt final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "aes_encrypt"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_aes_decrypt : public Item_str_func {
@@ -314,6 +327,8 @@ class Item_func_aes_decrypt : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "aes_decrypt"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_random_bytes : public Item_str_func {
@@ -328,6 +343,7 @@ class Item_func_random_bytes : public Item_str_func {
   bool itemize(Parse_context *pc, Item **res) override;
   bool resolve_type(THD *thd) override;
   String *val_str(String *a) override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 
   const char *func_name() const override { return "random_bytes"; }
 };
@@ -344,6 +360,7 @@ class Item_func_concat : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "concat"; }
+  Item* pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_concat_ws : public Item_str_func {
@@ -359,6 +376,7 @@ class Item_func_concat_ws : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "concat_ws"; }
+  Item* pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_reverse : public Item_str_func {
@@ -371,6 +389,7 @@ class Item_func_reverse : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "reverse"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_replace : public Item_str_func {
@@ -384,6 +403,7 @@ class Item_func_replace : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "replace"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_insert : public Item_str_func {
@@ -398,6 +418,7 @@ class Item_func_insert : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "insert"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_str_conv : public Item_str_func {
@@ -409,6 +430,7 @@ class Item_str_conv : public Item_str_func {
  public:
   Item_str_conv(const POS &pos, Item *item) : Item_str_func(pos, item) {}
   String *val_str(String *) override;
+  bool pq_copy_from(THD *thd, SELECT_LEX *select, Item *item) override;
 };
 
 class Item_func_lower : public Item_str_conv {
@@ -416,6 +438,7 @@ class Item_func_lower : public Item_str_conv {
   Item_func_lower(const POS &pos, Item *item) : Item_str_conv(pos, item) {}
   const char *func_name() const override { return "lower"; }
   bool resolve_type(THD *) override;
+  Item *pq_clone(THD *THD, SELECT_LEX *select) override;
 };
 
 class Item_func_upper : public Item_str_conv {
@@ -423,6 +446,7 @@ class Item_func_upper : public Item_str_conv {
   Item_func_upper(const POS &pos, Item *item) : Item_str_conv(pos, item) {}
   const char *func_name() const override { return "upper"; }
   bool resolve_type(THD *) override;
+  Item *pq_clone(THD *THD, SELECT_LEX *select) override;
 };
 
 class Item_func_left : public Item_str_func {
@@ -433,6 +457,7 @@ class Item_func_left : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "left"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_right : public Item_str_func {
@@ -444,13 +469,14 @@ class Item_func_right : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "right"; }
+
+  Item* pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_substr : public Item_str_func {
   typedef Item_str_func super;
 
   String tmp_value;
-
  public:
   Item_func_substr(Item *a, Item *b) : Item_str_func(a, b) {}
   Item_func_substr(const POS &pos, Item *a, Item *b) : super(pos, a, b) {}
@@ -462,6 +488,7 @@ class Item_func_substr : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "substr"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_substr_index final : public Item_str_func {
@@ -473,6 +500,8 @@ class Item_func_substr_index final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "substring_index"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_trim : public Item_str_func {
@@ -554,18 +583,21 @@ class Item_func_trim : public Item_str_func {
   }
   void print(const THD *thd, String *str,
              enum_query_type query_type) const override;
+  Item* pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_ltrim final : public Item_func_trim {
  public:
   Item_func_ltrim(const POS &pos, Item *a)
       : Item_func_trim(pos, a, TRIM_LTRIM) {}
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_rtrim final : public Item_func_trim {
  public:
   Item_func_rtrim(const POS &pos, Item *a)
       : Item_func_trim(pos, a, TRIM_RTRIM) {}
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_sysconst : public Item_str_func {
@@ -614,6 +646,7 @@ class Item_func_database : public Item_func_sysconst {
   const Name_string fully_qualified_func_name() const override {
     return NAME_STRING("database()");
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_user : public Item_func_sysconst {
@@ -653,6 +686,7 @@ class Item_func_user : public Item_func_sysconst {
   const Name_string fully_qualified_func_name() const override {
     return NAME_STRING("user()");
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_current_user : public Item_func_user {
@@ -670,6 +704,7 @@ class Item_func_current_user : public Item_func_user {
   const Name_string fully_qualified_func_name() const override {
     return NAME_STRING("current_user()");
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_soundex : public Item_str_func {
@@ -681,6 +716,7 @@ class Item_func_soundex : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "soundex"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_elt final : public Item_str_func {
@@ -692,15 +728,17 @@ class Item_func_elt final : public Item_str_func {
   String *val_str(String *str) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "elt"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_make_set final : public Item_str_func {
   typedef Item_str_func super;
-
-  Item *item;
   String tmp_str;
 
  public:
+  Item *item;
+
   Item_func_make_set(const POS &pos, Item *a, PT_item_list *opt_list)
       : Item_str_func(pos, opt_list), item(a) {}
 
@@ -731,6 +769,8 @@ class Item_func_make_set final : public Item_str_func {
   Item *transform(Item_transformer transformer, uchar *arg) override;
   void print(const THD *thd, String *str,
              enum_query_type query_type) const override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_format final : public Item_str_ascii_func {
@@ -749,6 +789,8 @@ class Item_func_format final : public Item_str_ascii_func {
   const char *func_name() const override { return "format"; }
   void print(const THD *thd, String *str,
              enum_query_type query_type) const override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_char final : public Item_str_func {
@@ -767,6 +809,7 @@ class Item_func_char final : public Item_str_func {
     return false;
   }
   const char *func_name() const override { return "char"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_repeat final : public Item_str_func {
@@ -778,6 +821,7 @@ class Item_func_repeat final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "repeat"; }
+    Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_space final : public Item_str_func {
@@ -786,6 +830,7 @@ class Item_func_space final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "space"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_rpad final : public Item_str_func {
@@ -797,6 +842,8 @@ class Item_func_rpad final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "rpad"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
+  bool pq_copy_from(THD *thd, SELECT_LEX *select, Item *item) override;
 };
 
 class Item_func_lpad final : public Item_str_func {
@@ -808,6 +855,8 @@ class Item_func_lpad final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "lpad"; }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
+  bool pq_copy_from(THD *thd, SELECT_LEX *select, Item *item) override;
 };
 
 class Item_func_uuid_to_bin final : public Item_str_func {
@@ -822,6 +871,8 @@ class Item_func_uuid_to_bin final : public Item_str_func {
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "uuid_to_bin"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_bin_to_uuid final : public Item_str_ascii_func {
@@ -836,6 +887,8 @@ class Item_func_bin_to_uuid final : public Item_str_ascii_func {
   String *val_str_ascii(String *) override;
   bool resolve_type(THD *thd) override;
   const char *func_name() const override { return "bin_to_uuid"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_is_uuid final : public Item_bool_func {
@@ -861,6 +914,7 @@ class Item_func_conv final : public Item_str_func {
   const char *func_name() const override { return "conv"; }
   String *val_str(String *) override;
   bool resolve_type(THD *) override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_hex : public Item_str_ascii_func {
@@ -874,6 +928,7 @@ class Item_func_hex : public Item_str_ascii_func {
     set_data_type_string(args[0]->max_length * 2U, default_charset());
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_unhex final : public Item_str_func {
@@ -890,6 +945,7 @@ class Item_func_unhex final : public Item_str_func {
     set_data_type_string((1U + args[0]->max_length) / 2U, &my_charset_bin);
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 #ifndef DBUG_OFF
@@ -945,6 +1001,7 @@ class Item_typecast_char final : public Item_str_func {
   bool resolve_type(THD *) override;
   void print(const THD *thd, String *str,
              enum_query_type query_type) const override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_load_file final : public Item_str_func {
@@ -985,6 +1042,8 @@ class Item_func_export_set final : public Item_str_func {
   String *val_str(String *str) override;
   bool resolve_type(THD *) override;
   const char *func_name() const override { return "export_set"; }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_quote : public Item_str_func {
@@ -995,6 +1054,8 @@ class Item_func_quote : public Item_str_func {
   const char *func_name() const override { return "quote"; }
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_conv_charset final : public Item_str_func {
@@ -1046,6 +1107,7 @@ class Item_func_conv_charset final : public Item_str_func {
   const char *func_name() const override { return "convert"; }
   void print(const THD *thd, String *str,
              enum_query_type query_type) const override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_set_collation final : public Item_str_func {
@@ -1070,6 +1132,8 @@ class Item_func_set_collation final : public Item_str_func {
     /* this function is transparent for view updating */
     return args[0]->field_for_view_update();
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
+  bool pq_copy_from(THD *thd, SELECT_LEX *select, Item *item) override;
 };
 
 class Item_func_charset final : public Item_str_func {
@@ -1084,6 +1148,8 @@ class Item_func_charset final : public Item_str_func {
     maybe_null = false;
     return false;
   }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_collation : public Item_str_func {
@@ -1098,6 +1164,7 @@ class Item_func_collation : public Item_str_func {
     maybe_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_weight_string final : public Item_str_func {
@@ -1129,6 +1196,8 @@ class Item_func_weight_string final : public Item_str_func {
   bool resolve_type(THD *) override;
   void print(const THD *thd, String *str,
              enum_query_type query_type) const override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_crc32 final : public Item_int_func {
@@ -1144,6 +1213,8 @@ class Item_func_crc32 final : public Item_int_func {
     return false;
   }
   longlong val_int() override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_uncompressed_length final : public Item_int_func {
@@ -1158,6 +1229,8 @@ class Item_func_uncompressed_length final : public Item_int_func {
     return false;
   }
   longlong val_int() override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_compress final : public Item_str_func {
@@ -1171,6 +1244,8 @@ class Item_func_compress final : public Item_str_func {
   }
   const char *func_name() const override { return "compress"; }
   String *val_str(String *str) override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_uncompress final : public Item_str_func {
@@ -1185,6 +1260,8 @@ class Item_func_uncompress final : public Item_str_func {
   }
   const char *func_name() const override { return "uncompress"; }
   String *val_str(String *str) override;
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_uuid final : public Item_str_func {
@@ -1209,6 +1286,8 @@ class Item_func_uuid final : public Item_str_func {
     return ((func_arg->source == VGS_GENERATED_COLUMN) ||
             (func_arg->source == VGS_CHECK_CONSTRAINT));
   }
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_gtid_subtract final : public Item_str_ascii_func {

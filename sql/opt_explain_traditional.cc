@@ -76,11 +76,12 @@ static const char *traditional_extra_tags[ET_total] = {
     "Table function:",                  // ET_TABLE_FUNCTION
     "Index dive skipped due to FORCE",  // ET_SKIP_RECORDS_IN_RANGE
     "Using secondary engine",           // ET_USING_SECONDARY_ENGINE
-    "Rematerialize"                     // ET_REMATERIALIZE
+    "Rematerialize",                    // ET_REMATERIALIZE
+    "Parallel execute"                     // ET_PARALLEL_SCAN
 };
 
 static const char *mod_type_name[] = {"NONE", "INSERT", "UPDATE", "DELETE",
-                                      "REPLACE"};
+                                      "REPLACE", "SIMPLE"};
 
 bool Explain_format_traditional::send_headers(Query_result *result) {
   return ((nil = new Item_null) == nullptr ||
@@ -206,6 +207,7 @@ bool Explain_format_traditional::flush_entry() {
           case ET_USING_JOIN_BUFFER:
           case ET_FIRST_MATCH:
           case ET_REMATERIALIZE:
+          case ET_PARALLEL_EXE:
             brackets = true;  // for backward compatibility
             break;
           default:

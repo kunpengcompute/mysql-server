@@ -998,7 +998,12 @@ void row_prebuilt_free(
   }
 
   prebuilt->m_lob_undo.destroy();
+  prebuilt->ctx = NULL;
 
+  if(prebuilt->pq_heap) {
+    mem_heap_free(prebuilt->pq_heap);
+    prebuilt->pq_heap = nullptr;
+  }
   mem_heap_free(prebuilt->heap);
 }
 

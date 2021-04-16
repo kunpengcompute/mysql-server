@@ -818,6 +818,8 @@ static const SYMBOL symbols[] = {
     /*
       Insert new optimizer hint keywords after that commentary:
     */
+    {SYM_H("PQ", PQ_HINT)},
+    {SYM_H("NO_PQ", NO_PQ_HINT)},
     {SYM_H("BKA", BKA_HINT)},
     {SYM_H("BNL", BNL_HINT)},
     {SYM_H("DUPSWEEDOUT", DUPSWEEDOUT_HINT)},

@@ -111,6 +111,7 @@
 #include "sql/tztime.h"
 #include "sql_string.h"
 #include "template_utils.h"
+#include "sql/exchange_sort.h"
 
 using Mysql::Nullable;
 using std::max;
@@ -213,7 +214,7 @@ void Sort_param::init_for_filesort(Filesort *file_sort,
   m_fixed_sort_length = sortlen;
   m_force_stable_sort = file_sort->m_force_stable_sort;
   m_remove_duplicates = remove_duplicates;
-  ref_length = table->file->ref_length;
+  ref_length = table->file->ref_length;  //row_id info.
 
   local_sortorder = sf_array;
 
@@ -441,8 +442,9 @@ bool filesort(THD *thd, Filesort *filesort, RowIterator *source_iterator,
   // However, do note this cannot change the addon fields status,
   // so that we at least know that when checking whether we can skip
   // in-between temporary tables (StreamingIterator).
-  if (check_if_pq_applicable(trace, param, fs_info, num_rows_estimate,
-                             memory_available)) {
+
+ if (check_if_pq_applicable(trace, param, fs_info,
+          num_rows_estimate, memory_available)) {
     DBUG_PRINT("info", ("filesort PQ is applicable"));
     /*
       For PQ queries (with limit) we know exactly how many pointers/records
@@ -476,7 +478,6 @@ bool filesort(THD *thd, Filesort *filesort, RowIterator *source_iterator,
 
     /*
       When sorting using priority queue, we cannot use packed addons.
-      Without PQ, we can try.
     */
     param->try_to_pack_addons();
 
@@ -658,15 +659,19 @@ Filesort::Filesort(THD *thd, TABLE *table_arg, bool keep_buffers_arg,
                    bool remove_duplicates, bool sort_positions)
     : m_thd(thd),
       table(table_arg),
+      m_order(order),
       keep_buffers(keep_buffers_arg),
       limit(limit_arg),
-      sortorder(nullptr),
+      sortorder(nullptr),   
       using_pq(false),
       m_force_stable_sort(
           force_stable_sort),  // keep relative order of equiv. elts
       m_remove_duplicates(remove_duplicates),
       m_force_sort_positions(sort_positions),
-      m_sort_order_length(make_sortorder(order)) {}
+      m_sort_order_length(0) {
+        if (order)
+          m_sort_order_length = make_sortorder(order);
+      }
 
 uint Filesort::make_sortorder(ORDER *order) {
   uint count;
@@ -962,9 +967,10 @@ static ha_rows read_all_rows(
     if ((error = source_iterator->Read())) {
       break;
     }
+
     // Note where we are, for the case where we are not using addon fields.
     if (!param->using_addon_fields()) {
-      file->position(sort_form->record[0]);
+      file->position(sort_form->record[0]); //read row_id
     }
     DBUG_EXECUTE_IF("debug_filesort", dbug_print_record(sort_form, true););
 
@@ -980,7 +986,7 @@ static ha_rows read_all_rows(
     else {
       size_t key_length;
       bool out_of_mem = alloc_and_make_sortkey(
-          param, fs_info, ref_pos, &key_length, &longest_addon_so_far);
+          param, fs_info, ref_pos, &key_length, &longest_addon_so_far); // push row_id at the last
       if (out_of_mem) {
         // Out of room, so flush chunk to disk (if there's anything to flush).
         if (num_records_this_chunk > 0) {
@@ -1271,6 +1277,7 @@ size_t make_sortkey_from_item(Item *item, Item_result result_type,
           // Heed the contract that strnxfrm needs an even number of bytes.
           --max_length;
         }
+
         actual_length = cs->coll->strnxfrm(
             cs, to, max_length, item->max_char_length(),
             pointer_cast<const uchar *>(from), src_length, 0);
@@ -2270,4 +2277,115 @@ void change_double_for_sort(double nr, uchar *to) {
   swap(to[2], to[5]);
   swap(to[3], to[4]);
 #endif
+}
+
+/**
+ * compare table->record[0] of two workers in PQ_merge_sort
+ * @a: the ID of first worker
+ * @b: the ID of second worker
+ * @arg: PQ_merge sort
+ * @return
+ *     true if a's record is less than b's record;
+ *     false otherwise.
+ */
+
+bool heap_compare_records(int a, int b, void *arg) {
+  DBUG_ASSERT(arg);
+  bool convert_res;
+
+  Exchange_sort *merge_sort = static_cast<Exchange_sort *>(arg);
+  const Filesort *filesort = merge_sort->get_filesort();
+  THD *thd = merge_sort->get_thd();
+  DBUG_ASSERT(filesort && current_thd == thd);
+
+  uchar *row_id_0 = merge_sort->get_row_id(0);
+  uchar *row_id_1 = merge_sort->get_row_id(1);
+  uchar *key_0 = merge_sort->get_key(0);
+  uchar *key_1 = merge_sort->get_key(1);
+
+  /** using previous old table when comparing row_id (or PK) */
+  handler *file = merge_sort->get_file();
+  DBUG_ASSERT(file->ht->db_type == DB_TYPE_INNODB);
+#if !defined(DBUG_OFF)
+  uint ref_len = merge_sort->ref_length();
+  DBUG_ASSERT(ref_len == file->ref_length);
+#endif
+  bool force_stable_sort = merge_sort->is_stable();
+  const uchar *ref_pos = merge_sort->get_tmp_key();
+
+  Sort_param *sort_param = merge_sort->get_sort_param();
+  int key_len = 0, compare_len = 0;
+
+  if (sort_param) {
+    key_len = sort_param->max_record_length() + 1;
+    compare_len = sort_param->max_compare_length();
+  }
+
+  /**
+   * the compare process contains the following three steps:
+   *   1. copy to table->record[0]
+   *   2. add row_id info.
+   *   3. generate sort key
+   */
+  mq_record_st *compare_a = merge_sort->get_record(a);
+  convert_res = merge_sort->convert_mq_data_to_record(compare_a->m_data,
+                                                      compare_a->m_length, row_id_0);
+
+  // there is an error during execution
+  if (!convert_res || DBUG_EVALUATE_IF("pq_msort_error6", true, false)) {
+    thd->pq_error = true;
+    return true;
+  }
+
+  /*
+   * using row_id to achieve stable sort, i.e.,
+   * record1 < record2 <=> key1 < key2 or (key1 = key2 && row_id1 < row_id2)
+   */
+
+  if (sort_param) {
+    sort_param->make_sortkey(key_0, key_len, ref_pos);
+  }
+
+  mq_record_st *compare_b= merge_sort->get_record(b);
+  convert_res= merge_sort->convert_mq_data_to_record(compare_b->m_data,
+                                                     compare_b->m_length, row_id_1);
+
+  // there is an error during execution
+  if (!convert_res || DBUG_EVALUATE_IF("pq_msort_error7", true, false)) {
+    thd->pq_error = true;
+    return true;
+  }
+
+  if (sort_param) {
+    sort_param->make_sortkey(key_1, key_len, ref_pos);
+  }
+
+  // c1: table scan (or index scan with optimized order = nullptr)
+  if (!filesort->sortorder) {
+    DBUG_ASSERT(sort_param == nullptr && force_stable_sort);
+    DBUG_ASSERT(row_id_0 && row_id_1);
+    return file->cmp_ref(row_id_0, row_id_1) < 0;
+  } else {
+    int cmp_key_result;
+    // c2: with order
+    if (sort_param !=nullptr && sort_param->using_varlen_keys()) {
+      cmp_varlen_keys(sort_param->local_sortorder, sort_param->use_hash,
+                      key_0, key_1, &cmp_key_result);
+      if (!force_stable_sort) {
+        return cmp_key_result < 0;
+      } else {
+        DBUG_ASSERT(row_id_0 && row_id_1);
+        return (cmp_key_result < 0 ||
+                (cmp_key_result == 0 && file->cmp_ref(row_id_0, row_id_1) < 0));
+      }
+    } else {
+      int cmp = memcmp(key_0, key_1, compare_len);
+      if (!force_stable_sort) {
+        return cmp < 0;
+      } else {
+        DBUG_ASSERT(row_id_0 && row_id_1);
+        return (cmp < 0 || (cmp == 0 && file->cmp_ref(row_id_0, row_id_1) < 0));
+      }
+    }
+  }
 }

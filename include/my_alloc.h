@@ -43,6 +43,7 @@
 #include "my_pointer_arithmetic.h"
 #include "mysql/psi/psi_memory.h"
 
+typedef void CallBackFunc(PSI_memory_key key, size_t length, unsigned int id) ;
 /**
  * The MEM_ROOT is a simple arena, where allocations are carved out of
  * larger blocks. Using an arena over plain malloc gives you two main
@@ -131,29 +132,8 @@ struct MEM_ROOT {
    *
    * The returned pointer will always be 8-aligned.
    */
-  void *Alloc(size_t length) MY_ATTRIBUTE((malloc)) {
-    length = ALIGN_SIZE(length);
-
-    // Skip the straight path if simulating OOM; it should always fail.
-    DBUG_EXECUTE_IF("simulate_out_of_memory", return AllocSlow(length););
-
-    // Fast path, used in the majority of cases. It would be faster here
-    // (saving one register due to CSE) to instead test
-    //
-    //   m_current_free_start + length <= m_current_free_end
-    //
-    // but it would invoke undefined behavior, and in particular be prone
-    // to wraparound on 32-bit platforms.
-    if (static_cast<size_t>(m_current_free_end - m_current_free_start) >=
-        length) {
-      void *ret = m_current_free_start;
-      m_current_free_start += length;
-      return ret;
-    }
-
-    return AllocSlow(length);
-  }
-
+  void *Alloc(size_t length) MY_ATTRIBUTE((malloc));
+ 
   /**
     Allocate “num” objects of type T, and default-construct them.
     If the constructor throws an exception, behavior is undefined.
@@ -331,6 +311,12 @@ struct MEM_ROOT {
   void (*m_error_handler)(void) = nullptr;
 
   PSI_memory_key m_psi_key = 0;
+
+public:
+  CallBackFunc *allocCBFunc = nullptr;
+
+  CallBackFunc *freeCBFunc = nullptr;
+
 };
 
 // Legacy C thunks. Do not use in new code.
