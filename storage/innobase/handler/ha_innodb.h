@@ -438,6 +438,20 @@ class ha_innobase : public handler {
   @retval 0 on success */
   int parallel_scan_init(void *&scan_ctx, size_t &num_threads) override;
 
+  //void clone_consistent_snapshop(void *scan_ctx) override;
+
+  int pq_leader_range_select_scan_init(uint keyno, void *&pq_ctx, uint &n_threads);
+
+  int pq_leader_skip_scan_select_scan_init(uint keyno, void *&pq_ctx, uint n_threads);  
+
+  int pq_leader_ref_init(uint keyno, void *&pq_ctx, uint &n_threads);
+
+  int pq_leader_scan_init(uint keyno, void *&scan_ctx, uint &n_threads) override;
+
+  int pq_worker_scan_init(uint keyno, void *scan_ctx) override;
+
+  int pq_leader_signal_all(void *scan_ctx) override;
+
   /** Start parallel read of InnoDB records.
   @param[in]  scan_ctx          A scan context created by parallel_scan_init
   @param[in]  thread_ctxs       Context for each of the spawned threads
@@ -452,9 +466,15 @@ class ha_innobase : public handler {
   int parallel_scan(void *scan_ctx, void **thread_ctxs, Reader::Init_fn init_fn,
                     Reader::Load_fn load_fn, Reader::End_fn end_fn) override;
 
+  int pq_worker_scan_next(void *scan_ctx, uchar* buf) override;
+
   /** End of the parallel scan.
   @param[in]      scan_ctx      A scan context created by parallel_scan_init. */
   void parallel_scan_end(void *scan_ctx) override;
+
+  int pq_leader_scan_end(void *parallel_scan_ctx) override;
+
+  int pq_worker_scan_end(void *parallel_scan_ctx) override;
 
   bool check_if_incompatible_data(HA_CREATE_INFO *info,
                                   uint table_changes) override;

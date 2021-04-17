@@ -790,7 +790,7 @@ SELECT_LEX_UNIT::setup_materialization(THD *thd, TABLE *dst_table,
     DBUG_ASSERT(join && join->is_optimized());
     DBUG_ASSERT(join->root_iterator() != nullptr);
     ConvertItemsToCopy(join->fields, dst_table->visible_field_ptr(),
-                       &join->tmp_table_param, join);
+                       join->tmp_table_param, join);
 
     query_block.subquery_iterator = join->release_root_iterator();
     query_block.select_number = select->select_number;
@@ -801,8 +801,8 @@ SELECT_LEX_UNIT::setup_materialization(THD *thd, TABLE *dst_table,
     // See the class comment on AggregateIterator.
     query_block.copy_fields_and_items =
         !join->streaming_aggregation ||
-        join->tmp_table_param.precomputed_group_by;
-    query_block.temp_table_param = &join->tmp_table_param;
+        join->tmp_table_param->precomputed_group_by;
+    query_block.temp_table_param = join->tmp_table_param;
     query_block.is_recursive_reference = select->recursive_reference;
 
     if (query_block.is_recursive_reference) {
@@ -924,11 +924,11 @@ void SELECT_LEX_UNIT::create_iterators(THD *thd) {
       JOIN *join = select->join;
       DBUG_ASSERT(join && join->is_optimized());
       ConvertItemsToCopy(join->fields, tmp_table->visible_field_ptr(),
-                         &join->tmp_table_param, join);
+                         join->tmp_table_param, join);
       bool copy_fields_and_items = !join->streaming_aggregation ||
-                                   join->tmp_table_param.precomputed_group_by;
+                                   join->tmp_table_param->precomputed_group_by;
       union_all_sub_iterators.emplace_back(NewIterator<StreamingIterator>(
-          thd, join->release_root_iterator(), &join->tmp_table_param, tmp_table,
+          thd, join->release_root_iterator(), join->tmp_table_param, tmp_table,
           copy_fields_and_items));
     }
   }
@@ -1163,12 +1163,24 @@ bool SELECT_LEX_UNIT::ExecuteIteratorQuery(THD *thd) {
 
   thd->get_stmt_da()->reset_current_row_for_condition();
   if (m_root_iterator->Init()) {
+    /** for parallel scan, we should end the root iterator*/
+    if (thd->parallel_exec) m_root_iterator->End();
     return true;
+  }
+
+  uint read_records_num = 0;
+  MQueue_handle *handler = query_result->get_mq_handler();
+  if (handler) {
+    handler->set_datched_status(MQ_NOT_DETACHED);
   }
 
   {
     PFSBatchMode pfs_batch_mode(m_root_iterator.get());
     auto join_cleanup = create_scope_guard([this, thd] {
+      if (thd->parallel_exec && thd->pq_iterator) {
+        thd->pq_iterator->End();
+      } 
+      
       for (SELECT_LEX *sl = first_select(); sl; sl = sl->next_select()) {
         JOIN *join = sl->join;
         join->join_free();
@@ -1179,26 +1191,51 @@ bool SELECT_LEX_UNIT::ExecuteIteratorQuery(THD *thd) {
       }
     });
 
+    bool execute_error = false;
     for (;;) {
       int error = m_root_iterator->Read();
       DBUG_EXECUTE_IF("bug13822652_1", thd->killed = THD::KILL_QUERY;);
 
-      if (error > 0 || thd->is_error())  // Fatal error
-        return true;
+      if (error > 0 || thd->is_error() || thd->is_pq_error())  // Fatal error
+        execute_error = true;
       else if (error < 0)
         break;
       else if (thd->killed)  // Aborted by user
       {
         thd->send_kill_message();
-        return true;
+        execute_error = true;
       }
 
+      if (execute_error) break;
       ++*send_records_ptr;
+      read_records_num++;
       if (query_result->send_data(thd, *fields)) {
-        return true;
+        execute_error = true;
+        break;
       }
       thd->get_stmt_da()->inc_current_row_for_condition();
     }
+
+    // if there is error, then for worker it should send an error msg to MQ and
+    // detach the MQ. Note that, only worker can detach the MQ.
+    if ((execute_error || !read_records_num ||
+         DBUG_EVALUATE_IF("pq_worker_error4", true, false)) &&
+        thd->is_worker()) {
+      MQ_DETACHED_STATUS status = MQ_NOT_DETACHED;
+      // there is an error during the execution
+      if (execute_error || DBUG_EVALUATE_IF("pq_worker_error4", true, false)) {
+        thd->pq_error = true;
+        if (handler != nullptr) {
+          handler->send_exception_msg(ERROR_MSG);
+        }
+        status = MQ_HAVE_DETACHED;
+      } else if (!read_records_num) {
+        status = MQ_TMP_DETACHED;
+      }
+      if (handler) handler->set_datched_status(status);
+    }
+
+    if (execute_error) return true;
 
     // NOTE: join_cleanup must be done before we send EOF, so that we get the
     // row counts right.

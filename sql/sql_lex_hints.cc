@@ -174,6 +174,8 @@ void Hint_scanner::add_hint_token_digest() {
           case NO_GROUP_INDEX_HINT:
           case ORDER_INDEX_HINT:
           case NO_ORDER_INDEX_HINT:
+          case PQ_HINT:
+          case NO_PQ_HINT:
             break;
           default:
             DBUG_ASSERT(false);

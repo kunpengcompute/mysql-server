@@ -118,6 +118,7 @@
 #include "tables_contained_in.h"
 #include "template_utils.h"
 #include "thr_lock.h"
+#include "msg_queue.h"
 
 using std::make_pair;
 using std::max;
@@ -127,7 +128,6 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
-static void join_setup_iterator(QEP_TAB *tab);
 static int read_system(TABLE *table);
 static int read_const(TABLE *table, TABLE_REF *ref);
 static bool alloc_group_fields(JOIN *join, ORDER *group);
@@ -137,7 +137,7 @@ static void SetCostOnTableIterator(const Cost_model_server &cost_model,
 static inline pair<uchar *, key_part_map> FindKeyBufferAndMap(
     const TABLE_REF *ref);
 
-/// Maximum amount of space (in bytes) to allocate for a Record_buffer.
+//  Maximum amount of space (in bytes) to allocate for a Record_buffer.
 static constexpr size_t MAX_RECORD_BUFFER_SIZE = 128 * 1024;  // 128KB
 
 string RefToString(const TABLE_REF &ref, const KEY *key, bool include_nulls) {
@@ -190,7 +190,7 @@ string RefToString(const TABLE_REF &ref, const KEY *key, bool include_nulls) {
 bool JOIN::create_intermediate_table(QEP_TAB *const tab,
                                      List<Item> *tmp_table_fields,
                                      ORDER_with_src &tmp_table_group,
-                                     bool save_sum_fields) {
+                                     bool save_sum_fields, bool force_disk_table) {
   DBUG_TRACE;
   THD_STAGE_INFO(thd, stage_creating_tmp_table);
   const bool windowing = m_windows.elements > 0;
@@ -205,7 +205,11 @@ bool JOIN::create_intermediate_table(QEP_TAB *const tab,
           ? m_select_limit
           : HA_POS_ERROR;
 
-  tab->tmp_table_param = new (thd->mem_root) Temp_table_param(tmp_table_param);
+  tab->tmp_table_param = new (thd->mem_root) Temp_table_param(*tmp_table_param);
+  if (tab->tmp_table_param == nullptr) {
+    return true;
+  }
+
   tab->tmp_table_param->skip_create_table = true;
 
   bool distinct_arg =
@@ -219,9 +223,9 @@ bool JOIN::create_intermediate_table(QEP_TAB *const tab,
   TABLE *table =
       create_tmp_table(thd, tab->tmp_table_param, *tmp_table_fields,
                        tmp_table_group, distinct_arg, save_sum_fields,
-                       select_lex->active_options(), tmp_rows_limit, "");
+                       select_lex->active_options(), tmp_rows_limit, "", force_disk_table);
   if (!table) return true;
-  tmp_table_param.using_outer_summary_function =
+  tmp_table_param->using_outer_summary_function =
       tab->tmp_table_param->using_outer_summary_function;
 
   DBUG_ASSERT(tab->idx() > 0);
@@ -257,9 +261,12 @@ bool JOIN::create_intermediate_table(QEP_TAB *const tab,
   if (group_list && simple_group) {
     DBUG_PRINT("info", ("Sorting for group"));
 
-    if (m_ordered_index_usage != ORDERED_INDEX_GROUP_BY &&
-        add_sorting_to_table(const_tables, &group_list))
-      goto err;
+    if (m_ordered_index_usage != ORDERED_INDEX_GROUP_BY) {
+      if (add_sorting_to_table(const_tables, &group_list))
+        goto err;
+      pq_last_sort_idx = const_tables;
+      pq_rebuilt_group = true;
+    }
 
     if (alloc_group_fields(this, group_list)) goto err;
     if (make_sum_func_list(all_fields, fields_list, true)) goto err;
@@ -279,9 +286,11 @@ bool JOIN::create_intermediate_table(QEP_TAB *const tab,
         !m_windows_sort) {
       DBUG_PRINT("info", ("Sorting for order"));
 
-      if (m_ordered_index_usage != ORDERED_INDEX_ORDER_BY &&
-          add_sorting_to_table(const_tables, &order))
-        goto err;
+      if (m_ordered_index_usage != ORDERED_INDEX_ORDER_BY) {
+        if (add_sorting_to_table(const_tables, &order))
+          goto err;
+        pq_last_sort_idx= const_tables;
+      }
       order = nullptr;
     }
   }
@@ -633,7 +642,7 @@ QEP_TAB::enum_op_type JOIN::get_end_select_func() {
      more aggregate functions). Use end_send if the query should not
      be grouped.
    */
-  if (streaming_aggregation && !tmp_table_param.precomputed_group_by) {
+  if (streaming_aggregation && !tmp_table_param->precomputed_group_by) {
     DBUG_PRINT("info", ("Using end_send_group"));
     return QEP_TAB::OT_AGGREGATE;
   }
@@ -1112,7 +1121,7 @@ struct PendingInvalidator {
     lateral tables.
    */
   QEP_TAB *qep_tab;
-  int table_index_to_attach_to;  // -1 means “on the last possible outer join”.
+  int table_index_to_attach_to;  // -1 means ¡°on the last possible outer join¡±.
 };
 
 /// @param item The item we want to see if is a join condition.
@@ -1146,7 +1155,7 @@ static Item *GetInnermostCondition(Item *item) {
 
   1. Join conditions (where not optimized into EQ_REF accesses or similar).
      These are attached as a condition on the rightmost table of the join;
-     if it's an outer join, they are wrapped in a “not_null_compl”
+     if it's an outer join, they are wrapped in a ¡°not_null_compl¡±
      condition, to mark that they should not be applied to the NULL values
      synthesized when no row is found. These can be kept on the table, and
      we don't really need the not_null_compl wrapper as long as we don't
@@ -1166,7 +1175,7 @@ static Item *GetInnermostCondition(Item *item) {
      E.g., for t1 LEFT JOIN t2 WHERE t1.x + t2.x > 3, the condition will be
      attached to t2's QEP_TAB, but needs to be attached above the join, or
      it would erroneously keep rows wherever t2 did not produce a
-     (real) row. Such conditions are marked with a “found” trigger (in the
+     (real) row. Such conditions are marked with a ¡°found¡± trigger (in the
      old execution engine, which tested qep_tab->condition() both before and
      after the join, it would need to be exempt from the first test).
 
@@ -1288,7 +1297,7 @@ static unique_ptr_destroy_only<RowIterator> CreateWeedoutIterator(
     THD *thd, unique_ptr_destroy_only<RowIterator> iterator,
     SJ_TMP_TABLE *weedout_table) {
   if (weedout_table->is_confluent) {
-    // A “confluent” weedout is one that deduplicates on all the
+    // A ¡°confluent¡± weedout is one that deduplicates on all the
     // fields. If so, we can drop the complexity of the WeedoutIterator
     // and simply insert a LIMIT 1.
     return NewIterator<LimitOffsetIterator>(
@@ -1549,13 +1558,13 @@ unique_ptr_destroy_only<RowIterator> GetIteratorForDerivedTable(
   // disturb the materialization going on inside our own query block.
   if (unit->is_simple()) {
     subjoin = unit->first_select()->join;
-    tmp_table_param = &unit->first_select()->join->tmp_table_param;
+    tmp_table_param = unit->first_select()->join->tmp_table_param;
     select_number = subjoin->select_lex->select_number;
   } else if (unit->fake_select_lex != nullptr) {
     // NOTE: subjoin here is never used, as ConvertItemsToCopy only uses it
     // for ROLLUP, and fake_select_lex can't have ROLLUP.
     subjoin = unit->fake_select_lex->join;
-    tmp_table_param = &unit->fake_select_lex->join->tmp_table_param;
+    tmp_table_param = unit->fake_select_lex->join->tmp_table_param;
     select_number = unit->fake_select_lex->select_number;
   } else {
     tmp_table_param = new (thd->mem_root) Temp_table_param;
@@ -1570,7 +1579,7 @@ unique_ptr_destroy_only<RowIterator> GetIteratorForDerivedTable(
     JOIN *join = unit->first_select()->join;
     copy_fields_and_items_in_materialize =
         !join->streaming_aggregation ||
-        join->tmp_table_param.precomputed_group_by;
+        join->tmp_table_param->precomputed_group_by;
   }
 
   MaterializeIterator *materialize = nullptr;
@@ -1611,7 +1620,7 @@ unique_ptr_destroy_only<RowIterator> GetIteratorForDerivedTable(
     // also conservative; if the CTEs is defined within this join and used
     // only once, we could still stream without losing performance.
     iterator = NewIterator<StreamingIterator>(
-        thd, unit->release_root_iterator(), &subjoin->tmp_table_param,
+        thd, unit->release_root_iterator(), subjoin->tmp_table_param,
         qep_tab->table(), copy_fields_and_items_in_materialize);
   } else {
     iterator = NewIterator<MaterializeIterator>(
@@ -2190,7 +2199,7 @@ unique_ptr_destroy_only<RowIterator> FinishPendingOperations(
 /**
   For a given slice of the table list, build up the iterator tree corresponding
   to the tables in that slice. It handles inner and outer joins, as well as
-  semijoins (“first match”).
+  semijoins (¡°first match¡±).
 
   The join tree in MySQL is generally a left-deep tree of inner joins,
   so we can start at the left, make an inner join against the next table,
@@ -2201,7 +2210,7 @@ unique_ptr_destroy_only<RowIterator> FinishPendingOperations(
   ourselves recursively with that slice, put it as the right (inner) arm of
   an outer join, and then continue with our inner join.
 
-  Similarly, if a table N has set “first match” to table M (ie., jump back to
+  Similarly, if a table N has set ¡°first match¡± to table M (ie., jump back to
   table M whenever we see a non-filtered record in table N), then there is a
   subslice from [M+1,N] that we need to process recursively before putting it
   as the right side of a semijoin. Every semijoin can be implemented with a
@@ -2396,7 +2405,7 @@ static unique_ptr_destroy_only<RowIterator> ConnectJoins(
         join_type =
             (pending_conditions == nullptr) ? JoinType::ANTI : JoinType::OUTER;
 
-        // Normally, a ”found” trigger means that the condition should be moved
+        // Normally, a ¡±found¡± trigger means that the condition should be moved
         // up above some outer join (ie., it's a WHERE, not an ON condition).
         // However, there is one specific case where the optimizer sets up such
         // a trigger with the condition being _the same table as it's posted
@@ -2405,7 +2414,7 @@ static unique_ptr_destroy_only<RowIterator> ConnectJoins(
         // they should inhibit the null-complemented row. (So in this case,
         // the antijoin is no longer just an optimization that can be ignored
         // as we rewrite into an outer join.) In this case, there's a condition
-        // wrapped in “not_null_compl” and ”found”, with the trigger for both
+        // wrapped in ¡°not_null_compl¡± and ¡±found¡±, with the trigger for both
         // being the same table as the condition is posted on.
         //
         // So, as a special exception, detect this case, removing these
@@ -2882,34 +2891,45 @@ unique_ptr_destroy_only<RowIterator> JOIN::create_root_iterator_for_join() {
     iterator = NewIterator<TableValueConstructorIterator>(
         thd, &examined_rows, *select_lex->row_value_list, fields);
   } else if (const_tables == primary_tables) {
-    // Only const tables, so add a fake single row to join in all
+    // Only const tables, so add a fake single row (or the rewritten table ) to join in all
     // the const tables (only inner-joined tables are promoted to
     // const tables in the optimizer).
-    iterator = NewIterator<FakeSingleRowIterator>(thd, &examined_rows);
-    qep_tab_map conditions_depend_on_outer_tables = 0;
-    if (where_cond != nullptr) {
-      iterator = PossiblyAttachFilterIterator(
-          move(iterator), vector<Item *>{where_cond}, thd,
-          &conditions_depend_on_outer_tables);
-    }
+    if (need_tmp_pq_leader) {
+      DBUG_ASSERT(thd->parallel_exec && !thd->is_worker());
+      QEP_TAB *tab = &qep_tab[const_tables];
+      tab->iterator.reset();
+      join_setup_iterator(tab);
+      iterator =
+          NewIterator<ParallelScanIterator>(thd, tab, tab->table(), nullptr, this,
+                                            tab->gather, pq_stable_sort,
+                                            tab->old_table()->file->ref_length);
+    } else {
+      iterator = NewIterator<FakeSingleRowIterator>(thd, &examined_rows);
+      qep_tab_map conditions_depend_on_outer_tables = 0;
+      if (where_cond != nullptr) {
+        iterator = PossiblyAttachFilterIterator(
+            move(iterator), vector<Item *>{where_cond}, thd,
+            &conditions_depend_on_outer_tables);
+      }
 
-    // Surprisingly enough, we can specify that the const tables are
-    // to be dumped immediately to a temporary table. If we don't do this,
-    // we risk that there are fields that are not copied correctly
-    // (tmp_table_param contains copy_funcs we'd otherwise miss).
-    if (const_tables > 0) {
-      QEP_TAB *qep_tab = &this->qep_tab[const_tables];
-      if (qep_tab->op_type == QEP_TAB::OT_MATERIALIZE) {
-        qep_tab->iterator.reset();
-        join_setup_iterator(qep_tab);
-        qep_tab->table()->alias = "<temporary>";
-        iterator = NewIterator<MaterializeIterator>(
-            thd, move(iterator), qep_tab->tmp_table_param, qep_tab->table(),
-            move(qep_tab->iterator), /*cte=*/nullptr, select_lex->select_number,
-            unit, this, qep_tab->ref_item_slice,
-            /*copy_fields_and_items=*/true,
-            /*rematerialize=*/true,
-            qep_tab->tmp_table_param->end_write_records);
+      // Surprisingly enough, we can specify that the const tables are
+      // to be dumped immediately to a temporary table. If we don't do this,
+      // we risk that there are fields that are not copied correctly
+      // (tmp_table_param contains copy_funcs we'd otherwise miss).
+      if (const_tables > 0) {
+        QEP_TAB *qep_tab = &this->qep_tab[const_tables];
+        if (qep_tab->op_type == QEP_TAB::OT_MATERIALIZE) {
+          qep_tab->iterator.reset();
+          join_setup_iterator(qep_tab);
+          qep_tab->table()->alias = "<temporary>";
+          iterator = NewIterator<MaterializeIterator>(
+              thd, move(iterator), qep_tab->tmp_table_param, qep_tab->table(),
+              move(qep_tab->iterator), /*cte=*/nullptr, select_lex->select_number,
+              unit, this, qep_tab->ref_item_slice,
+              /*copy_fields_and_items=*/true,
+              /*rematerialize=*/true,
+              qep_tab->tmp_table_param->end_write_records);
+        }
       }
     }
   } else {
@@ -2987,7 +3007,7 @@ unique_ptr_destroy_only<RowIterator> JOIN::create_root_iterator_for_join() {
 
     // The pre-iterator executor did duplicate removal by going into the
     // temporary table and actually deleting records, using a hash table for
-    // smaller tables and an O(n²) algorithm for large tables. This kind of
+    // smaller tables and an O(n2) algorithm for large tables. This kind of
     // deletion is not cleanly representable in the iterator model, so we do it
     // using a duplicate-removing filesort instead, which has a straight-up
     // O(n log n) cost.
@@ -3065,7 +3085,7 @@ unique_ptr_destroy_only<RowIterator> JOIN::create_root_iterator_for_join() {
             move(qep_tab->iterator), /*cte=*/nullptr, select_lex->select_number,
             unit, this,
             /*ref_slice=*/-1, /*copy_fields_and_items_in_materialize=*/false,
-            /*rematerialize=*/true, tmp_table_param.end_write_records);
+            /*rematerialize=*/true, tmp_table_param->end_write_records);
       }
     } else if (qep_tab->op_type == QEP_TAB::OT_AGGREGATE_INTO_TMP_TABLE) {
       iterator = NewIterator<TemptableAggregateIterator>(
@@ -3153,24 +3173,24 @@ unique_ptr_destroy_only<RowIterator> JOIN::create_root_iterator_for_join() {
     do_aggregate = (qep_tab[primary_tables + tmp_tables].op_type ==
                     QEP_TAB::OT_AGGREGATE) ||
                    ((grouped || group_optimized_away) &&
-                    tmp_table_param.precomputed_group_by);
+                    tmp_table_param->precomputed_group_by);
   }
   if (do_aggregate) {
     // Aggregate as we go, with output into a special slice of the same table.
-    DBUG_ASSERT(streaming_aggregation || tmp_table_param.precomputed_group_by);
+    DBUG_ASSERT(streaming_aggregation || tmp_table_param->precomputed_group_by);
 #ifndef DBUG_OFF
     for (unsigned table_idx = const_tables; table_idx < tables; ++table_idx) {
       DBUG_ASSERT(qep_tab->op_type != QEP_TAB::OT_AGGREGATE_THEN_MATERIALIZE);
     }
 #endif
-    if (tmp_table_param.precomputed_group_by) {
+    if (tmp_table_param->precomputed_group_by) {
       iterator = NewIterator<PrecomputedAggregateIterator>(
-          thd, move(iterator), this, &tmp_table_param,
+          thd, move(iterator), this, tmp_table_param,
           REF_SLICE_ORDERED_GROUP_BY);
       DBUG_ASSERT(rollup.state == ROLLUP::STATE_NONE);
     } else {
       iterator = NewIterator<AggregateIterator>(
-          thd, move(iterator), this, &tmp_table_param,
+          thd, move(iterator), this, tmp_table_param,
           REF_SLICE_ORDERED_GROUP_BY, rollup.state != ROLLUP::STATE_NONE);
     }
   }
@@ -3967,7 +3987,11 @@ bool DynamicRangeIterator::Init() {
   Key_map needed_reg_dummy;
   QUICK_SELECT_I *old_qck = m_qep_tab->quick();
   QUICK_SELECT_I *qck;
-  DEBUG_SYNC(thd(), "quick_not_created");
+  if (thd()->pq_leader != nullptr) {
+    DEBUG_SYNC(thd()->pq_leader, "quick_not_created");
+  } else {
+    DEBUG_SYNC(thd(), "quick_not_created");
+  }
   const int rc = test_quick_select(thd(), m_qep_tab->keys(),
                                    0,  // empty table map
                                    HA_POS_ERROR,
@@ -3989,16 +4013,23 @@ bool DynamicRangeIterator::Init() {
     that, we need to take mutex and change type and quick_optim.
   */
 
-  DEBUG_SYNC(thd(), "quick_created_before_mutex");
-
+  if (thd()->pq_leader != nullptr) {
+    DEBUG_SYNC(thd()->pq_leader, "quick_created_before_mutex");
+  } else {
+    DEBUG_SYNC(thd(), "quick_created_before_mutex");
+  }
+   
   thd()->lock_query_plan();
   m_qep_tab->set_type(qck ? calc_join_type(qck->get_type()) : JT_ALL);
   m_qep_tab->set_quick_optim();
   thd()->unlock_query_plan();
 
   delete old_qck;
-  DEBUG_SYNC(thd(), "quick_droped_after_mutex");
-
+  if (thd()->pq_leader != nullptr) {
+    DEBUG_SYNC(thd()->pq_leader, "quick_droped_after_mutex");
+  } else {
+    DEBUG_SYNC(thd(), "quick_droped_after_mutex");
+  }
   // Clear out and destroy any old iterators before we start constructing
   // new ones, since they may share the same memory in the union.
   m_iterator.reset();
@@ -4041,7 +4072,7 @@ vector<string> DynamicRangeIterator::DebugString() const {
   return {str};
 }
 
-static void join_setup_iterator(QEP_TAB *tab) {
+void join_setup_iterator(QEP_TAB *tab) {
   bool using_table_scan;
   tab->iterator =
       create_table_iterator(tab->join()->thd, nullptr, tab, false,
@@ -4280,15 +4311,17 @@ vector<string> AlternativeIterator::DebugString() const {
 void QEP_TAB::pick_table_access_method() {
   DBUG_ASSERT(table());
   // Only some access methods support reversed access:
-  DBUG_ASSERT(!m_reversed_access || type() == JT_REF ||
-              type() == JT_INDEX_SCAN);
+  DBUG_ASSERT(current_thd->parallel_exec || !m_reversed_access ||
+                 type() == JT_REF || type() == JT_INDEX_SCAN);
   TABLE_REF *used_ref = nullptr;
 
   const TABLE *pushed_root = table()->file->member_of_pushed_join();
   const bool is_pushed_child = (pushed_root && pushed_root != table());
   // A 'pushed_child' has to be a REF type
-  DBUG_ASSERT(!is_pushed_child || type() == JT_REF || type() == JT_EQ_REF);
+  DBUG_ASSERT(current_thd->parallel_exec || !is_pushed_child ||
+                 type() == JT_REF || type() == JT_EQ_REF);
 
+  bool pq_replace_iter = false;
   switch (type()) {
     case JT_REF:
       if (is_pushed_child) {
@@ -4299,10 +4332,12 @@ void QEP_TAB::pick_table_access_method() {
         iterator = NewIterator<RefIterator<true>>(join()->thd, table(), &ref(),
                                                   use_order(), this,
                                                   &join()->examined_rows);
+        pq_replace_iter = true;
       } else {
         iterator = NewIterator<RefIterator<false>>(join()->thd, table(), &ref(),
                                                    use_order(), this,
                                                    &join()->examined_rows);
+        pq_replace_iter = true;
       }
       used_ref = &ref();
       break;
@@ -4341,10 +4376,12 @@ void QEP_TAB::pick_table_access_method() {
         iterator = NewIterator<IndexScanIterator<true>>(
             join()->thd, table(), index(), use_order(), this,
             &join()->examined_rows);
+        pq_replace_iter = true;
       } else {
         iterator = NewIterator<IndexScanIterator<false>>(
             join()->thd, table(), index(), use_order(), this,
             &join()->examined_rows);
+        pq_replace_iter = true;
       }
       break;
     case JT_ALL:
@@ -4357,7 +4394,8 @@ void QEP_TAB::pick_table_access_method() {
         iterator =
             create_table_iterator(join()->thd, nullptr, this, false,
                                   /*ignore_not_found_rows=*/false,
-                                  &join()->examined_rows, &m_using_table_scan);
+                                  &join()->examined_rows, &m_using_table_scan,
+                                  &pq_replace_iter);
       }
       break;
     default:
@@ -4379,7 +4417,7 @@ void QEP_TAB::pick_table_access_method() {
       EXISTS ( SELECT 1 FROM t2 LIMIT 1 ) ? NULL : FALSE.
 
     Thus, in the case of nullable <expr>, the rewriter inserts so-called
-    “condition guards” (pointers to bool saying whether <expr> was NULL or not,
+    ¡°condition guards¡± (pointers to bool saying whether <expr> was NULL or not,
     for each part of <expr> if it contains multiple columns). These condition
     guards do two things:
 
@@ -4411,6 +4449,14 @@ void QEP_TAB::pick_table_access_method() {
         break;
       }
     }
+  }
+
+  /** note that: for gather operator, we have no need to generate iterator */
+  if (current_thd->is_worker() && pq_replace_iter && do_parallel_scan) {
+    iterator.reset();
+    iterator = NewIterator<PQblockScanIterator>(current_thd, table(), table()->record[0],
+                                                &join()->examined_rows, gather,
+                                                join()->pq_stable_sort);
   }
 }
 
@@ -4457,6 +4503,7 @@ ulonglong get_exact_record_count(QEP_TAB *qep_tab, uint table_count,
   }
   *error = 0;
   return count;
+
 }
 
 static bool cmp_field_value(Field *field, ptrdiff_t diff) {
@@ -5590,8 +5637,8 @@ bool process_buffered_windowing_record(THD *thd, Temp_table_param *param,
       (!static_aggregate && !optimizable))        // normal: no skip
   {
     // Compute and output current_row.
-    int64 rowno;        ///< iterates over rows in a frame
-    int64 skipped = 0;  ///< RANGE: # of visited rows seen before the frame
+    int64 rowno;        // < iterates over rows in a frame
+    int64 skipped = 0;  // < RANGE: # of visited rows seen before the frame
 
     for (rowno = lower_limit; rowno <= upper; rowno++) {
       if (optimizable) optimizable_primed = true;
@@ -6296,7 +6343,8 @@ bool setup_copy_fields(List<Item> &all_fields, size_t num_select_elements,
     } else if (((real_pos->type() == Item::FUNC_ITEM ||
                  real_pos->type() == Item::SUBSELECT_ITEM ||
                  real_pos->type() == Item::CACHE_ITEM ||
-                 real_pos->type() == Item::COND_ITEM) &&
+                 real_pos->type() == Item::COND_ITEM ||
+                 real_pos->type() == Item::COPY_STR_ITEM) &&
                 !real_pos->has_aggregation() &&
                 !real_pos->has_rollup_expr())) {  // Save for send fields
       pos = real_pos;
@@ -6306,7 +6354,13 @@ bool setup_copy_fields(List<Item> &all_fields, size_t num_select_elements,
          on how the value is to be used: In some cases this may be an
          argument in a group function, like: IF(ISNULL(col),0,COUNT(*))
       */
-      Item_copy *item_copy = Item_copy::create(pos);
+      Item_copy *item_copy = nullptr;
+      if(real_pos->type() != Item::COPY_STR_ITEM) {
+        item_copy = Item_copy::create(pos);
+      } else {
+        item_copy = dynamic_cast<Item_copy*>(pos);
+      }
+ 
       if (item_copy == nullptr) return true;
       pos = item_copy;
       if (i < border)  // HAVING, ORDER and GROUP BY
@@ -6444,7 +6498,9 @@ bool change_to_use_tmp_fields(List<Item> &all_fields,
         ifield->db_name = iref->db_name;
       }
 #ifndef DBUG_OFF
-      if (!item_field->item_name.is_set()) {
+      /* Do not set the item_name here when parallel query to keep the MTR 
+         execution results of the release and debug versions same. */
+      if (!item_field->item_name.is_set() && !thd->m_suite_for_pq) {
         char buff[256];
         String str(buff, sizeof(buff), &my_charset_bin);
         str.length(0);
@@ -6583,7 +6639,7 @@ bool JOIN::clear_fields(table_map *save_nullinfo) {
       table->set_null_row();  // All fields are NULL
     }
   }
-  if (copy_fields(&tmp_table_param, thd)) return true;
+  if (copy_fields(tmp_table_param, thd)) return true;
 
   if (sum_funcs) {
     Item_sum *func, **func_ptr = sum_funcs;
@@ -6660,7 +6716,7 @@ int UnqualifiedCountIterator::Read() {
   // If we are outputting to a temporary table, we need to copy the results
   // into it here. It is also used for nonaggregated items, even when there are
   // no temporary tables involved.
-  if (copy_fields_and_funcs(&m_join->tmp_table_param, m_join->thd)) {
+  if (copy_fields_and_funcs(m_join->tmp_table_param, m_join->thd)) {
     return 1;
   }
 

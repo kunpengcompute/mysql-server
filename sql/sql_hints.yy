@@ -114,6 +114,9 @@ static bool parse_int(longlong *to, const char *from, size_t from_length)
 %token NO_GROUP_INDEX_HINT 1044
 %token ORDER_INDEX_HINT 1045
 %token NO_ORDER_INDEX_HINT 1046
+%token PQ_HINT      1047
+%token NO_PQ_HINT   1048
+
 
 /*
   Please add new tokens right above this line.
@@ -210,7 +213,6 @@ hint:
         | set_var_hint
         | resource_group_hint
         ;
-
 
 max_execution_time_hint:
           MAX_EXECUTION_TIME_HINT '(' HINT_ARG_NUMBER ')'
@@ -393,6 +395,34 @@ qb_level_hint:
           JOIN_FIXED_ORDER_HINT '(' opt_qb_name  ')'
           {
             $$= NEW_PTN PT_qb_level_hint($3, true, JOIN_FIXED_ORDER_HINT_ENUM, 0);
+            if ($$ == NULL)
+              YYABORT; // OOM
+          }
+          | 
+          PQ_HINT
+          {
+            $$= NEW_PTN PT_qb_level_hint(NULL_CSTR, true, PQ_HINT_ENUM, 0);
+            if ($$ == NULL)
+              YYABORT; // OOM
+          }
+          |
+          PQ_HINT '(' HINT_ARG_NUMBER ')'
+          {
+            longlong n;
+            if (parse_int(&n, $3.str, $3.length) || n > UINT_MAX32 || n <= 0)
+            {
+              scanner->syntax_warning(ER_THD(thd,
+                                             ER_WARN_BAD_PARALLEL_NUM));
+              $$= NULL;
+            } else {
+              $$= NEW_PTN PT_qb_level_hint(NULL_CSTR, true, PQ_HINT_ENUM, n);
+              if ($$ == NULL)
+                YYABORT; // OOM
+            }
+          }
+          |
+          NO_PQ_HINT           {
+            $$= NEW_PTN PT_qb_level_hint(NULL_CSTR, true, NO_PQ_HINT_ENUM, 0);
             if ($$ == NULL)
               YYABORT; // OOM
           }

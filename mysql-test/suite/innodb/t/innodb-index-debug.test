@@ -94,7 +94,21 @@ connection con1;
 --echo /*con1 reap*/ Optimize table t1;
 reap;
 --disable_info
-SELECT COUNT(k1),k2,k3 FROM t1 GROUP BY k2,k3;
+
+
+--let $force_parallel_execute=`show variables like 'force_parallel_execute'`
+--let $pq_enable = `SELECT SUBSTRING_INDEX('$force_parallel_execute', '	', -1)`
+
+if($pq_enable != ON)
+{
+  SELECT COUNT(k1),k2,k3 FROM t1 GROUP BY k2,k3;
+}
+
+if($pq_enable == ON)
+{
+  SELECT COUNT(k1),k2,k3 FROM t1 GROUP BY k2,k3 ORDER BY k2, k3;
+}
+
 drop table t1;
 
 # Log file creation failure.

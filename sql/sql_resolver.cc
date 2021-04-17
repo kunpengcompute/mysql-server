@@ -145,7 +145,7 @@ static TABLE_LIST *locate_derived(mem_root_deque<TABLE_LIST *> &tables,
    - As far as INSERT, UPDATE and DELETE statements have the same expressions
      as a SELECT statement, this note applies to those statements as well.
 */
-bool SELECT_LEX::prepare(THD *thd) {
+bool SELECT_LEX:: prepare(THD *thd) {
   DBUG_TRACE;
 
   // We may do subquery transformation, or Item substitution:
@@ -161,6 +161,8 @@ bool SELECT_LEX::prepare(THD *thd) {
   if (is_table_value_constructor) return prepare_values(thd);
 
   SELECT_LEX_UNIT *const unit = master_unit();
+
+  if (has_windows()) saved_windows_elements = m_windows.elements;
 
   if (!top_join_list.empty()) propagate_nullability(&top_join_list, false);
 
@@ -511,6 +513,14 @@ bool SELECT_LEX::prepare(THD *thd) {
   */
   if (m_windows.elements != 0) Window::remove_unused_windows(thd, m_windows);
 
+  if (suite_for_parallel_query(thd)) {
+    if (group_list.elements)
+      fix_prepare_information_for_order(thd, &group_list,
+                                        &saved_group_list_ptrs);
+    if (order_list.elements)
+      fix_prepare_information_for_order(thd, &order_list,
+                                        &saved_order_list_ptrs);
+  }
   DBUG_ASSERT(!thd->is_error());
   return false;
 }
@@ -4047,8 +4057,9 @@ bool find_order_in_list(THD *thd, Ref_item_array ref_item_array,
          order_item_type == Item::FIELD_ITEM) ||
         order_item_type == Item::REF_ITEM) {
       from_field =
-          find_field_in_tables(thd, (Item_ident *)order_item, tables, nullptr,
-                               &view_ref, IGNORE_ERRORS, true, false);
+          find_field_in_tables(thd, (Item_ident *)order_item, tables,
+                               nullptr, &view_ref, IGNORE_ERRORS,
+                               !thd->pq_leader, false);
       if (thd->is_error()) return true;
 
       if (!from_field) from_field = not_found_field;

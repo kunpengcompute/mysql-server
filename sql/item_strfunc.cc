@@ -3094,10 +3094,12 @@ bool Item_func_weight_string::resolve_type(THD *) {
     UCA level separators at all?
   */
   set_data_type_string(
-      field ? field->pack_length()
-            : result_length ? result_length
-                            : cs->mbmaxlen * max(args[0]->max_char_length(),
-                                                 num_codepoints));
+          field ? field->pack_length()
+                : result_length
+                  ? result_length
+                  : (uint32)cs->coll->strnxfrmlen(
+                          cs, cs->mbmaxlen *
+                              max<size_t>(args[0]->max_char_length(), num_codepoints)));
   maybe_null = true;
   return false;
 }

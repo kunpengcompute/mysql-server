@@ -2923,6 +2923,29 @@ int handler::ha_rnd_init(bool scan) {
   return result;
 }
 
+int handler::ha_pq_init(uint &dop, uint keyno) {
+  DBUG_EXECUTE_IF("ha_pq_init_fail", return HA_ERR_TABLE_DEF_CHANGED;);
+  int result;
+  DBUG_ENTER("handler::ha_pq_init");
+  DBUG_ASSERT(table_share->tmp_table != NO_TMP_TABLE || m_lock_type != F_UNLCK);
+  DBUG_ASSERT(inited == NONE || inited == INDEX || (inited == PQ));
+  THD *cur_thd= table->in_use;
+  inited = (result = pq_leader_scan_init(keyno, cur_thd->pq_ctx, dop)) ? NONE : PQ;
+  end_range = NULL;
+  pq_ref = false;
+  pq_reverse_scan = false;
+  DBUG_RETURN(result);
+}
+
+int handler::ha_pq_signal_all() {
+  DBUG_ENTER("handler::ha_pq_signal_all");
+  int result;
+  THD *cur_thd= table->in_use;
+  result = pq_leader_signal_all(cur_thd->pq_ctx);
+
+  DBUG_RETURN(result);
+}
+
 /**
   End use of random access.
 
@@ -2930,7 +2953,6 @@ int handler::ha_rnd_init(bool scan) {
     @retval 0     Success
     @retval != 0  Error (error code returned)
 */
-
 int handler::ha_rnd_end() {
   DBUG_TRACE;
   /* SQL HANDLER function can call this without having it locked. */
@@ -2940,8 +2962,26 @@ int handler::ha_rnd_end() {
   inited = NONE;
   end_range = nullptr;
   m_record_buffer = nullptr;
+  pq_range_type = PQ_QUICK_SELECT_NONE;
+
   return rnd_end();
 }
+
+int handler::ha_pq_end() {
+  DBUG_ENTER("handler::ha_pq_end");
+
+  if(pq_table_scan){
+    inited = RND;
+    ha_rnd_end();
+  } else {
+    inited = INDEX;
+    ha_index_end();
+  }
+
+  THD *thd = current_thd;
+  DBUG_RETURN(pq_leader_scan_end(thd->pq_ctx));
+}
+ 
 
 /**
   Read next row via random scan.
@@ -2972,6 +3012,27 @@ int handler::ha_rnd_next(uchar *buf) {
   table->set_row_status_from_handler(result);
   return result;
 }
+
+int handler::ha_pq_next(uchar *buf, void *scan_ctx) {
+  int result;
+  DBUG_EXECUTE_IF("ha_pq_next_deadlock", return HA_ERR_LOCK_DEADLOCK;);
+  DBUG_ENTER("handler::ha_pq_next");
+  DBUG_ASSERT(table_share->tmp_table != NO_TMP_TABLE || m_lock_type != F_UNLCK);
+
+  // Set status for the need to update generated fields
+  m_update_generated_read_fields = table->has_gcol();
+
+  MYSQL_TABLE_IO_WAIT(PSI_TABLE_FETCH_ROW, pq_table_scan?MAX_KEY:active_index, result,
+                      { result = pq_worker_scan_next(scan_ctx, buf); })
+  if (!result && m_update_generated_read_fields) {
+    result = update_generated_read_fields(buf, table, pq_table_scan?MAX_KEY:active_index);
+    m_update_generated_read_fields = false;
+  }
+  table->set_row_status_from_handler(result);
+  DBUG_RETURN(result);
+}
+
+
 
 /**
   Read row via random scan from position.
@@ -6467,6 +6528,12 @@ int DsMrr_impl::dsmrr_init(RANGE_SEQ_IF *seq_funcs, void *seq_init_param,
     return retval;
   }
 
+  if(!thd->in_sp_trigger && thd->parallel_exec && table->file->pq_range_type != PQ_QUICK_SELECT_NONE) {
+    use_default_impl = true;
+    retval = h->handler::multi_range_read_init(seq_funcs, seq_init_param,
+                                               n_ranges, mode, buf);
+    return retval;
+  }
   /*
     This assert will hit if we have pushed an index condition to the
     primary key index and then "change our mind" and use a different

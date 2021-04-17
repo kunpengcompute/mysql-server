@@ -60,6 +60,8 @@ extern int _db_is_pushed_(void);
 extern void _db_process_(const char *name);
 extern void _db_push_(const char *control);
 extern void _db_pop_(void);
+extern void pq_stack_copy(CODE_STATE *leader_cs);
+extern void pq_stack_reset();
 extern void _db_set_(const char *control);
 extern void _db_set_init_(const char *control);
 extern void _db_enter_(const char *_func_, int func_len, const char *_file_,

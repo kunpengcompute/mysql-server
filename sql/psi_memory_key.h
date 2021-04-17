@@ -161,6 +161,7 @@ extern PSI_memory_key key_memory_table_mapping_root;
 extern PSI_memory_key key_memory_table_share;
 extern PSI_memory_key key_memory_test_quick_select_exec;
 extern PSI_memory_key key_memory_thd_main_mem_root;
+extern PSI_memory_key key_memory_pq_mem_root;
 extern PSI_memory_key key_memory_thd_timer;
 extern PSI_memory_key key_memory_thd_transactions;
 extern PSI_memory_key key_memory_user_conn;

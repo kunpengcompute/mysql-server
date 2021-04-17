@@ -262,6 +262,8 @@ class Item_func_regexp_instr : public Item_func_regexp {
   bool get_time(MYSQL_TIME *t) override { return get_time_from_int(t); }
   /// @}
 
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
+
  protected:
   int pos_arg_pos() const override { return 2; }
   int occ_arg_pos() const override { return 3; }
@@ -302,6 +304,8 @@ class Item_func_regexp_like : public Item_func_regexp {
 
   bool get_time(MYSQL_TIME *t) override { return get_time_from_int(t); }
   /// @}
+
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 
  protected:
   int pos_arg_pos() const override { return -1; }

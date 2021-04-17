@@ -161,6 +161,10 @@ int LimitOffsetIterator::Read() {
   return m_source->Read();
 }
 
+int LimitOffsetIterator::End() {
+  return m_source->End();
+}
+
 vector<RowIterator::Child> FilterIterator::children() const {
   // Return the source iterator, and also iterators for any subqueries in the
   // condition.
@@ -239,7 +243,7 @@ AggregateIterator::AggregateIterator(
 }
 
 bool AggregateIterator::Init() {
-  DBUG_ASSERT(!m_join->tmp_table_param.precomputed_group_by);
+  DBUG_ASSERT(!m_join->tmp_table_param->precomputed_group_by);
   if (m_source->Init()) {
     return true;
   }
@@ -258,6 +262,10 @@ bool AggregateIterator::Init() {
   m_state = READING_FIRST_ROW;
 
   return false;
+}
+
+int AggregateIterator::End() {
+  return m_source->End();
 }
 
 int AggregateIterator::Read() {
@@ -535,7 +543,7 @@ vector<string> AggregateIterator::DebugString() const {
 }
 
 bool PrecomputedAggregateIterator::Init() {
-  DBUG_ASSERT(m_join->tmp_table_param.precomputed_group_by);
+  DBUG_ASSERT(m_join->tmp_table_param->precomputed_group_by);
   DBUG_ASSERT(m_join->grouped || m_join->group_optimized_away);
   return m_source->Init();
 }
@@ -1509,6 +1517,10 @@ int TemptableAggregateIterator::Read() {
     }
   }
   return m_table_iterator->Read();
+}
+
+int TemptableAggregateIterator::End() {
+  return m_subquery_iterator->End();
 }
 
 vector<string> TemptableAggregateIterator::DebugString() const {

@@ -263,6 +263,7 @@ class QUICK_SELECT_I {
   QUICK_SELECT_I(const QUICK_SELECT_I &) = default;
   virtual ~QUICK_SELECT_I() {}
 
+  virtual uint quick_select_type() { return PQ_QUICK_SELECT_NONE; }
   /*
     Do post-constructor initialization.
     SYNOPSIS
@@ -428,6 +429,9 @@ class QUICK_SELECT_I {
   */
   virtual void get_fields_used(MY_BITMAP *used_fields) = 0;
   void trace_quick_description(Opt_trace_context *trace);
+
+  virtual bool pq_copy_from(THD *thd,QUICK_SELECT_I*);
+  virtual QUICK_SELECT_I* pq_clone(THD *, TABLE*){ return nullptr; }
 };
 
 class PARAM;
@@ -515,6 +519,8 @@ class QUICK_RANGE_SELECT : public QUICK_SELECT_I {
                      MEM_ROOT *parent_alloc, bool *create_error);
   ~QUICK_RANGE_SELECT();
 
+  uint quick_select_type() override;
+
   void need_sorted_output();
   int init();
   int reset(void);
@@ -542,6 +548,9 @@ class QUICK_RANGE_SELECT : public QUICK_SELECT_I {
     for (uint i = 0; i < used_key_parts; i++)
       bitmap_set_bit(used_fields, key_parts[i].field->field_index);
   }
+
+  bool pq_copy_from(THD *thd, QUICK_SELECT_I*) override;
+  QUICK_SELECT_I* pq_clone(THD *thd, TABLE *table) override;
 
  private:
   /* Default copy ctor used by QUICK_SELECT_DESC */
@@ -636,6 +645,8 @@ class QUICK_INDEX_MERGE_SELECT : public QUICK_SELECT_I {
   void add_keys_and_lengths(String *key_names, String *used_lengths);
   void add_info_string(String *str);
   bool is_keys_used(const MY_BITMAP *fields);
+  virtual bool pq_copy_from(THD *thd, QUICK_SELECT_I* quick);
+  virtual QUICK_SELECT_I* pq_clone(THD *thd, TABLE *tab);
 #ifndef DBUG_OFF
   void dbug_dump(int indent, bool verbose);
 #endif
@@ -699,7 +710,7 @@ class QUICK_INDEX_MERGE_SELECT : public QUICK_SELECT_I {
   If one of the merged quick selects is a Clustered PK range scan, it is
   used only to filter rowid sequence produced by other merged quick selects.
 */
-
+//select * from t1  where a = 1 and b = 5;
 class QUICK_ROR_INTERSECT_SELECT : public QUICK_SELECT_I {
  public:
   QUICK_ROR_INTERSECT_SELECT(THD *thd, TABLE *table, bool retrieve_full_rows,
@@ -724,6 +735,8 @@ class QUICK_ROR_INTERSECT_SELECT : public QUICK_SELECT_I {
 #endif
   int init_ror_merged_scan(bool reuse_handler);
   bool push_quick_back(QUICK_RANGE_SELECT *quick_sel_range);
+  bool pq_copy_from(THD *thd, QUICK_SELECT_I*) override;
+  QUICK_SELECT_I* pq_clone(THD *thd, TABLE *table) override;
 
   /*
     Range quick selects this intersection consists of, not including
@@ -787,7 +800,6 @@ struct Quick_ror_union_less {
   ROR-union quick select always retrieves full records.
 
 */
-
 class QUICK_ROR_UNION_SELECT : public QUICK_SELECT_I {
  public:
   QUICK_ROR_UNION_SELECT(THD *thd, TABLE *table);
@@ -809,6 +821,9 @@ class QUICK_ROR_UNION_SELECT : public QUICK_SELECT_I {
 #ifndef DBUG_OFF
   void dbug_dump(int indent, bool verbose);
 #endif
+
+  bool pq_copy_from(THD *thd, QUICK_SELECT_I*) override;
+  QUICK_SELECT_I* pq_clone(THD *thd, TABLE *table) override;
 
   bool push_quick_back(QUICK_SELECT_I *quick_sel_range);
 
@@ -954,6 +969,7 @@ class QUICK_GROUP_MIN_MAX_SELECT : public QUICK_SELECT_I {
   bool add_range(SEL_ARG *sel_range, int idx);
   void update_key_stat();
   void adjust_prefix_ranges();
+
   int init();
   void need_sorted_output() { /* always do it */
   }
@@ -980,7 +996,7 @@ class QUICK_GROUP_MIN_MAX_SELECT : public QUICK_SELECT_I {
   }
   void add_info_string(String *str);
 };
-
+//select * from t1  where a > 1 and a < 5 order by a desc;
 class QUICK_SELECT_DESC : public QUICK_RANGE_SELECT {
  public:
   QUICK_SELECT_DESC(QUICK_RANGE_SELECT *q, uint used_key_parts);
@@ -993,8 +1009,9 @@ class QUICK_SELECT_DESC : public QUICK_RANGE_SELECT {
   QUICK_SELECT_I *make_reverse(uint) {
     return this;  // is already reverse sorted
   }
-
- private:
+  QUICK_SELECT_I* pq_clone(THD*, TABLE*);
+  uint quick_select_type() override;
+private:
   bool range_reads_after_key(QUICK_RANGE *range);
   int reset(void) {
     rev_it.rewind();
@@ -1100,6 +1117,7 @@ class QUICK_SKIP_SCAN_SELECT : public QUICK_SELECT_I {
                          const Cost_estimate *read_cost_arg, ha_rows records,
                          MEM_ROOT *parent_alloc, bool has_aggregate_function);
   ~QUICK_SKIP_SCAN_SELECT();
+
   bool set_range(SEL_ARG *sel_range);
   int init();
   void need_sorted_output() {}

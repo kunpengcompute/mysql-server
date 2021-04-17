@@ -575,6 +575,7 @@ class ha_innopart : public ha_innobase,
   @return 0 on success */
   int parallel_scan(void *scan_ctx, void **thread_ctxs, Reader::Init_fn init_fn,
                     Reader::Load_fn load_fn, Reader::End_fn end_fn) override;
+
   /** Run the parallel read of data.
   @param[in]      parallel_scan_ctx a scan context created by
                                     parallel_scan_init

@@ -400,6 +400,9 @@ class Statement_backup {
 
     m_query_string = thd->query();
     thd->set_query(stmt->m_query_string);
+    if (thd->lex != nullptr) {
+      thd->lex->in_execute_ps = true;
+    }
 
     return;
   }
@@ -418,6 +421,7 @@ class Statement_backup {
 
     stmt->m_query_string = thd->query();
     thd->set_query(m_query_string);
+    thd->lex->in_execute_ps = false;
 
     return;
   }

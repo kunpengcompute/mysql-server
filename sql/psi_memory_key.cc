@@ -145,6 +145,7 @@ PSI_memory_key key_memory_user_var_entry;
 PSI_memory_key key_memory_user_var_entry_value;
 PSI_memory_key key_memory_sp_cache;
 PSI_memory_key key_memory_write_set_extraction;
+PSI_memory_key key_memory_pq_mem_root;
 
 #ifdef HAVE_PSI_INTERFACE
 
@@ -165,6 +166,8 @@ static PSI_memory_info all_server_memory[] = {
     {&key_memory_acl_map_cache, "acl_map_cache", PSI_FLAG_ONLY_GLOBAL_STAT, 0,
      PSI_DOCUMENT_ME},
     {&key_memory_thd_main_mem_root, "thd::main_mem_root", PSI_FLAG_THREAD, 0,
+     PSI_DOCUMENT_ME},
+    {&key_memory_pq_mem_root, "thd::parallel_query_mem_root", PSI_FLAG_THREAD, 0,
      PSI_DOCUMENT_ME},
     {&key_memory_help, "help", 0, 0, PSI_DOCUMENT_ME},
     {&key_memory_table_share, "TABLE_SHARE::mem_root",

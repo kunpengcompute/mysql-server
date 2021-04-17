@@ -64,7 +64,7 @@ class Parallel_reader_adapter {
   @param[in]  f                 Callback function.
   @retval error. */
   dberr_t add_scan(trx_t *trx, const Parallel_reader::Config &config,
-                   Parallel_reader::F &&f) MY_ATTRIBUTE((warn_unused_result));
+                   Parallel_reader::F &&f, bool split= false) MY_ATTRIBUTE((warn_unused_result));
 
   /** Run the parallel scan.
   @param[in]  thread_contexts   Context for each of the spawned threads

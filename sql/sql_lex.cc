@@ -2086,6 +2086,8 @@ SELECT_LEX::SELECT_LEX(MEM_ROOT *mem_root, Item *where, Item *having)
       partitioned_table_count(0),
       order_list(),
       order_list_ptrs(nullptr),
+      saved_group_list_ptrs(NULL),
+      saved_order_list_ptrs(NULL),
       select_limit(nullptr),
       offset_limit(nullptr),
       select_n_having_items(0),
@@ -2119,7 +2121,8 @@ SELECT_LEX::SELECT_LEX(MEM_ROOT *mem_root, Item *where, Item *having)
       m_json_agg_func_used(false),
       m_empty_query(false),
       sj_candidates(nullptr),
-      hidden_order_field_count(0) {
+      hidden_order_field_count(0),
+      saved_windows_elements(0) {
   end_lateral_table = nullptr;
 }
 
@@ -4658,6 +4661,49 @@ bool SELECT_LEX::walk(Item_processor processor, enum_walk walk, uchar *arg) {
   }
   return false;
 }
+
+bool SELECT_LEX::pq_check_table_list() {
+  for (TABLE_LIST *tbl_list = table_list.first; tbl_list != nullptr;
+       tbl_list = tbl_list->next_local) {
+    // skip derived table or view
+    if (tbl_list->is_view_or_derived()) return true;
+
+    // skip explicit table lock
+    if (tbl_list->lock_descriptor().type > TL_READ_DEFAULT ||
+        current_thd->locking_clause)
+      return true;
+
+    TABLE *tb = tbl_list->table;
+    if (tb != nullptr &&
+        (tb->s->tmp_table != NO_TMP_TABLE ||         // template table
+         tb->file->ht->db_type != DB_TYPE_INNODB ||  // Non-InnoDB table
+         tb->part_info ||                            // partition table
+         tb->fulltext_searched))                     // fulltext match search
+      return true;
+  }
+  return false;
+}
+
+/*
+ * determine whether suitable for parallel query
+ *
+ */
+bool SELECT_LEX::suite_for_parallel_query(THD *thd)
+{
+  if (!thd->suite_for_parallel_query() ||
+      first_inner_unit() != nullptr ||     // nesting subquery, including view〝derived table〝subquery condition and so on.
+      outer_select() != nullptr ||         // nested subquery
+      is_distinct() ||                     // select distinct
+      saved_windows_elements)              // windows function
+  {
+    thd->m_suite_for_pq = false;
+    return false;
+  }
+
+  return true;
+}
+
+
 
 /**
   Finds a (possibly unresolved) table reference in the from clause by name.

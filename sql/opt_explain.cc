@@ -72,6 +72,7 @@
 #include "sql/mysqld_thd_manager.h"  // Global_THD_manager
 #include "sql/opt_costmodel.h"
 #include "sql/opt_explain_format.h"
+#include "sql/opt_explain_json.h"
 #include "sql/opt_range.h"  // QUICK_SELECT_I
 #include "sql/opt_trace.h"  // Opt_trace_*
 #include "sql/protocol.h"
@@ -96,6 +97,7 @@
 #include "sql/timing_iterator.h"
 #include "sql_string.h"
 #include "template_utils.h"
+#include "sql/sql_parallel.h"
 
 class Opt_trace_context;
 
@@ -149,6 +151,7 @@ class Explain {
   bool order_list;  ///< if query block has ORDER BY
 
   const bool explain_other;  ///< if we explain other thread than us
+
 
  protected:
   class Lazy_condition : public Lazy {
@@ -428,7 +431,7 @@ class Explain_join : public Explain_table_base {
                SELECT_LEX *select_lex_arg, bool need_tmp_table_arg,
                bool need_order_arg, bool distinct_arg)
       : Explain_table_base(CTX_JOIN, explain_thd_arg, query_thd_arg,
-                           select_lex_arg),
+                           select_lex_arg, nullptr),
         need_tmp_table(need_tmp_table_arg),
         need_order(need_order_arg),
         distinct(distinct_arg),
@@ -448,6 +451,7 @@ class Explain_join : public Explain_table_base {
   bool end_simple_sort_context(Explain_sort_clause clause,
                                enum_parsing_context ctx);
   bool explain_qep_tab(size_t tab_num);
+  bool explain_pq_gather(QEP_TAB *tab);
 
  protected:
   virtual bool shallow_explain();
@@ -1131,6 +1135,11 @@ bool Explain_join::explain_modify_flags() {
       break;
     default:;
   };
+
+  if (query_thd->parallel_exec && (const_cast<THD*>(query_thd))->is_worker() == false) {
+    fmt->entry()->mod_type = MT_GATHER;
+  }
+
   return false;
 }
 
@@ -1271,6 +1280,10 @@ bool Explain_join::shallow_explain() {
   if (begin_sort_context(ESC_BUFFER_RESULT, CTX_BUFFER_RESULT))
     return true; /* purecov: inspected */
 
+  if (join->thd->parallel_exec && join->primary_tables == 0) {
+    join->primary_tables = 1;
+  }
+
   for (size_t t = 0, cnt = fmt->is_hierarchical() ? join->primary_tables
                                                   : join->tables;
        t < cnt; t++) {
@@ -1289,10 +1302,54 @@ bool Explain_join::shallow_explain() {
   return false;
 }
 
+bool Explain_join::explain_pq_gather(QEP_TAB *tab) {
+ 
+  DBUG_ASSERT(tab->gather);
+
+  JOIN *gather_join = tab->gather->m_template_join;
+  SELECT_LEX *select_lex = gather_join->select_lex;
+  const Explain_format_flags *flags = &gather_join->explain_flags;
+  const bool need_tmp_table = flags->any(ESP_USING_TMPTABLE);
+  const bool need_order = flags->any(ESP_USING_FILESORT);
+  const bool distinct = flags->get(ESC_DISTINCT, ESP_EXISTS);
+  select_lex->join->best_read = this->join->best_read;
+  bool ret = true;
+
+  gather_join->thd->lock_query_plan();
+  bool explain_other = explain_thd != query_thd;
+  Explain_join *ej = new(gather_join->thd->pq_mem_root)
+                         Explain_join(explain_thd,
+                                      explain_other ? gather_join->thd : explain_thd,   // to generate the same explain_other as origin
+                                      select_lex, need_tmp_table,
+                                      need_order, distinct);
+  if (ej == nullptr) {
+    goto END;
+  }
+
+  if (!explain_other) {
+    ej->query_thd = gather_join->thd;
+  }
+
+  if (ej->fmt->begin_context(CTX_GATHER, nullptr)) {
+    goto END;
+  }
+
+  ret = ej->shallow_explain() || ej->explain_subqueries();
+  if (!ret) {
+    ret = ej->fmt->end_context(CTX_GATHER);
+  }
+
+END:
+  gather_join->thd->unlock_query_plan();
+  return ret;
+}
+
 bool Explain_join::explain_qep_tab(size_t tabnum) {
+
   tab = join->qep_tab + tabnum;
   if (!tab->position()) return false;
   table = tab->table();
+
   usable_keys = tab->keys();
   usable_keys.merge(table->possible_quick_keys);
   quick_type = -1;
@@ -1317,6 +1374,11 @@ bool Explain_join::explain_qep_tab(size_t tabnum) {
 
   Semijoin_mat_exec *const sjm = tab->sj_mat_exec();
   const enum_parsing_context c = sjm ? CTX_MATERIALIZATION : CTX_QEP_TAB;
+
+  if (tab->gather) {
+    need_tmp_table = false;
+    need_order = false;
+  }
 
   if (fmt->begin_context(c) || prepare_columns()) return true;
 
@@ -1343,6 +1405,10 @@ bool Explain_join::explain_qep_tab(size_t tabnum) {
   }
 
   if (fmt->end_context(c)) return true;
+
+  // explain parallel query execute plan
+  if (tab->gather)
+    explain_pq_gather(tab);
 
   if (first_non_const) {
     if (end_simple_sort_context(ESC_GROUP_BY, CTX_SIMPLE_GROUP_BY)) return true;
@@ -1609,6 +1675,13 @@ bool Explain_join::explain_extra() {
   if (table->s->is_secondary_engine() &&
       push_extra(ET_USING_SECONDARY_ENGINE, table->file->table_type()))
     return true;
+
+  if (tab->gather) {
+    StringBuffer<64> buff(cs);
+    buff.append_ulonglong(tab->gather->m_dop); 
+    buff.append(" workers");
+    if (push_extra(ET_PARALLEL_EXE, buff)) return true;
+  }
 
   return false;
 }
@@ -2208,6 +2281,7 @@ bool explain_query(THD *explain_thd, const THD *query_thd,
   const bool other = (explain_thd != query_thd);
 
   LEX *lex = explain_thd->lex;
+
   if (lex->explain_format->is_tree()) {
     if (lex->is_explain_analyze) {
       if (explain_thd->lex->m_sql_cmd != nullptr &&

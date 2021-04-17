@@ -214,7 +214,7 @@ void my_handler_error_register() {
     (check mysys/ma_handler_errors.h and include/my_base.h).
   */
   static_assert(
-      HA_ERR_FIRST + array_elements(handler_error_messages) == HA_ERR_LAST + 1,
+     HA_ERR_FIRST + array_elements(handler_error_messages) == HA_ERR_LAST + 1,
       "Wrong number of elements in handler_error_messages.");
   my_error_register(get_handler_error_message, HA_ERR_FIRST,
                     HA_ERR_FIRST + array_elements(handler_error_messages) - 1);
