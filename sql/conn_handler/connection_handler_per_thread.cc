@@ -24,6 +24,7 @@
 
 #include <stddef.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <list>
 #include <new>
 
@@ -298,11 +299,11 @@ static void *handle_connection(void *arg) {
 
     auto sched_affinity_manager =
         sched_affinity::Sched_affinity_manager::get_instance();
-    int sched_affinty_group_index = -1;
-    bool bind_succeed = false;
+    bool is_registered_to_sched_affinity = false;
+    auto pid = sched_affinity::gettid();
     if (sched_affinity_manager != nullptr) {
-      if (!(bind_succeed = sched_affinity_manager->bind_to_group(
-                sched_affinty_group_index))) {
+      if (!(is_registered_to_sched_affinity = sched_affinity_manager->register_thread(
+                sched_affinity::Thread_type::FOREGROUND, pid))) {
         LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "foreground");
       }
     }
@@ -317,9 +318,11 @@ static void *handle_connection(void *arg) {
     }
     close_connection(thd, 0, false, false);
 
-    if (bind_succeed && sched_affinity_manager != nullptr) {
-      if (!sched_affinity_manager->unbind_from_group(sched_affinty_group_index)) {
-        LogErr(ERROR_LEVEL, ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "foreground");
+    if (is_registered_to_sched_affinity && sched_affinity_manager != nullptr) {
+      if (!sched_affinity_manager->unregister_thread(
+              sched_affinity::Thread_type::FOREGROUND, pid)) {
+        LogErr(ERROR_LEVEL, ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY,
+               "foreground");
       }
     }
 

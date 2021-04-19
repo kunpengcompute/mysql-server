@@ -1020,6 +1020,7 @@ bool migrate_connect_options = false;
 uint host_cache_size;
 ulong log_error_verbosity = 3;  // have a non-zero value during early start-up
 extern std::map<sched_affinity::Thread_type, const char*> sched_affinity_parameter;
+extern bool sched_affinity_numa_aware;
 
 #if defined(_WIN32)
 /*
@@ -6685,7 +6686,7 @@ int mysqld_main(int argc, char **argv)
   /* Determine default TCP port and unix socket name */
   set_ports();
 
-  if (sched_affinity::Sched_affinity_manager::create_instance(sched_affinity_parameter) == nullptr) {
+  if (sched_affinity::Sched_affinity_manager::create_instance(sched_affinity_parameter, sched_affinity_numa_aware) == nullptr) {
     LogErr(ERROR_LEVEL, ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER);
     unireg_abort(MYSQLD_ABORT_EXIT);
   }

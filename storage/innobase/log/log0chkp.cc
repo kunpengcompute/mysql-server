@@ -50,6 +50,8 @@ the file COPYING.Google.
 #include <debug_sync.h>
 #endif /* !UNIV_HOTBACKUP */
 
+#include <unistd.h>
+
 #include "arch0arch.h"
 #include "buf0buf.h"
 #include "buf0flu.h"
@@ -955,8 +957,12 @@ static bool log_consider_checkpoint(log_t &log) {
 
 void log_checkpointer(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
-  if (sched_affinity_manager!=nullptr){
-    if(!sched_affinity_manager->bind_to_target(sched_affinity::Thread_type::LOG_CHECKPOINTER)){
+  bool is_registered_to_sched_affinity = false;
+  auto pid = sched_affinity::gettid();
+  if (sched_affinity_manager != nullptr) {
+    if (!(is_registered_to_sched_affinity =
+              sched_affinity_manager->register_thread(
+                  sched_affinity::Thread_type::LOG_CHECKPOINTER, pid))) {
       ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_checkpointer");
     }
   }
@@ -1025,6 +1031,12 @@ void log_checkpointer(log_t *log_ptr) {
   }
 
   log_checkpointer_mutex_exit(log);
+  if (is_registered_to_sched_affinity && sched_affinity_manager != nullptr) {
+    if (!sched_affinity_manager->unregister_thread(
+            sched_affinity::Thread_type::LOG_CHECKPOINTER, pid)) {
+      LogErr(ERROR_LEVEL, ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "log_checkpointer");
+    }
+  }
 }
 
 /* @} */
