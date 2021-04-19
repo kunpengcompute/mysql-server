@@ -1,3 +1,14 @@
+/*****************************************************************************
+Copyright (c) 2020, Huawei Technologies Co., Ltd. All Rights Reserved.
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 2.0, as published by the
+Free Software Foundation.
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License, version 2.0,
+for more details.
+*****************************************************************************/
+
 #ifndef SCHED_AFFINITY_MANAGER_H
 #define SCHED_AFFINITY_MANAGER_H
 #include "my_config.h"
