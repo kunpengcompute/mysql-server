@@ -216,10 +216,8 @@ Thread_type Sched_affinity_manager_numa::get_thread_type_by_pid(
 
 bool Sched_affinity_manager_numa::bind_to_group(const pid_t pid) {
   auto thread_type = get_thread_type_by_pid(pid);
-  if (thread_type == Thread_type::UNDEFINED) {
-    return false;
-  }
-  if (!is_thread_sched_enabled(thread_type)) {
+  if (thread_type == Thread_type::UNDEFINED ||
+      !is_thread_sched_enabled(thread_type)) {
     return false;
   }
   auto &sched_affinity_group = m_sched_affinity_group[thread_type];
@@ -248,9 +246,8 @@ bool Sched_affinity_manager_numa::bind_to_group(const pid_t pid) {
     ++sched_affinity_group[best_index].assigned_thread_num;
     m_pid_group_id[pid] = best_index;
     return true;
-  } else {
-    return false;
   }
+  return false;
 }
 
 bool Sched_affinity_manager_numa::unbind_from_group(const pid_t pid) {
@@ -348,17 +345,15 @@ std::pair<std::string, bool> Sched_affinity_manager_numa::normalize_cpu_string(
   if (core_id != INVALID_CORE_ID) {
     normalized_cpu_string += std::to_string(core_id);
   }
-  if (!normalized_cpu_string.empty()) {
-    if (*normalized_cpu_string.rbegin() == '-' ||
-        *normalized_cpu_string.rbegin() == ',') {
-      invalid_cpu_string = true;
-    }
+  if (!normalized_cpu_string.empty() &&
+      (*normalized_cpu_string.rbegin() == '-' ||
+       *normalized_cpu_string.rbegin() == ',')) {
+    invalid_cpu_string = true;
   }
   if (invalid_cpu_string) {
     return std::make_pair(std::string(), false);
-  } else {
-    return std::make_pair(normalized_cpu_string, true);
   }
+  return std::make_pair(normalized_cpu_string, true);
 }
 
 }  // namespace sched_affinity
