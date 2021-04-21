@@ -48,6 +48,7 @@ class ReadView;
 
 /** Finds out if an active transaction has inserted or modified a secondary
  index record.
+ @param[in,out] caller_trx  trx of current thread
  @param[in]   rec       record in a secondary index
  @param[in]   index     the secondary index
  @param[in]   offsets   rec_get_offsets(rec, index)
@@ -56,8 +57,8 @@ class ReadView;
  negatives. The caller must confirm all positive results by checking if the trx
  is still active.
 */
-trx_t *row_vers_impl_x_locked(const rec_t *rec, const dict_index_t *index,
-                              const ulint *offsets);
+trx_t *row_vers_impl_x_locked(trx_t *caller_trx, const rec_t *rec,
+                              const dict_index_t *index, const ulint *offsets);
 
 /** Finds out if we must preserve a delete marked earlier version of a clustered
  index record, because it is >= the purge view.
@@ -119,6 +120,7 @@ dberr_t row_vers_build_for_consistent_read(
 /** Constructs the last committed version of a clustered index record,
  which should be seen by a semi-consistent read. */
 void row_vers_build_for_semi_consistent_read(
+    trx_t* caller_trx,        /*!< in/out: trx of current thread */
     const rec_t *rec,         /*!< in: record in a clustered index; the
                               caller must have a latch on the page; this
                               latch locks the top of the stack of versions
