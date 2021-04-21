@@ -26,6 +26,16 @@ const Thread_type thread_types[] = {
     Thread_type::LOG_FLUSH_NOTIFIER, Thread_type::LOG_CLOSER,
     Thread_type::LOG_CHECKPOINTER,   Thread_type::PURGE_COORDINATOR};
 
+const std::map<Thread_type, std::string> thread_type_names = {
+    {Thread_type::FOREGROUND, "foreground"},
+    {Thread_type::LOG_WRITER, "log_writer"},
+    {Thread_type::LOG_FLUSHER, "log_flusher"},
+    {Thread_type::LOG_WRITE_NOTIFIER, "log_write_notifier"},
+    {Thread_type::LOG_FLUSH_NOTIFIER, "log_flush_notifier"},
+    {Thread_type::LOG_CLOSER, "log_closer"},
+    {Thread_type::LOG_CHECKPOINTER, "log_checkpointer"},
+    {Thread_type::PURGE_COORDINATOR, "purge_coordinator"}};
+
 class Lock_guard {
  public:
   explicit Lock_guard(mysql_mutex_t &mutex) {
@@ -84,7 +94,7 @@ bool Sched_affinity_manager_numa::init(
       continue;
     }
     m_thread_pid[thread_type] = std::set<pid_t>();
-    auto cpu_string = sched_affinity_parameter.find(thread_type)->second;
+    auto cpu_string = sched_affinity_parameter.at(thread_type);
     if (cpu_string != nullptr &&
         !init_sched_affinity_info(std::string(cpu_string),
                                   m_thread_bitmask[thread_type])) {
@@ -184,10 +194,6 @@ bool Sched_affinity_manager_numa::register_thread(const Thread_type thread_type,
                                                   const pid_t pid) {
   const Lock_guard lock(m_mutex);
   m_thread_pid[thread_type].insert(pid);
-  if (!is_thread_sched_enabled(thread_type)) {
-    return true;
-  }
-
   bind_to_group(pid);
   return true;
 }
@@ -195,12 +201,8 @@ bool Sched_affinity_manager_numa::register_thread(const Thread_type thread_type,
 bool Sched_affinity_manager_numa::unregister_thread(
     const Thread_type thread_type, const pid_t pid) {
   const Lock_guard lock(m_mutex);
-  m_thread_pid[thread_type].erase(pid);
-  if (!is_thread_sched_enabled(thread_type)) {
-    return true;
-  }
-
   unbind_from_group(pid);
+  m_thread_pid[thread_type].erase(pid);
   return true;
 }
 
@@ -252,10 +254,8 @@ bool Sched_affinity_manager_numa::bind_to_group(const pid_t pid) {
 
 bool Sched_affinity_manager_numa::unbind_from_group(const pid_t pid) {
   auto thread_type = get_thread_type_by_pid(pid);
-  if (thread_type == Thread_type::UNDEFINED) {
-    return false;
-  }
-  if (!is_thread_sched_enabled(thread_type)) {
+  if (thread_type == Thread_type::UNDEFINED ||
+      !is_thread_sched_enabled(thread_type)) {
     return false;
   }
   auto &sched_affinity_group = m_sched_affinity_group[thread_type];
@@ -264,34 +264,28 @@ bool Sched_affinity_manager_numa::unbind_from_group(const pid_t pid) {
       index->second >= static_cast<int>(sched_affinity_group.size())) {
     return false;
   }
+  --sched_affinity_group[index->second].assigned_thread_num;
   m_pid_group_id.erase(index);
   return true;
 }
 
-void Sched_affinity_manager_numa::take_snapshot(char *buff, int buff_size) {
-  // TODO support more status
-  if (buff == nullptr || buff_size <= 0) {
-    return;
-  }
-  buff[0] = '\0';
-  if (m_sched_affinity_group.find(Thread_type::FOREGROUND) ==
-      m_sched_affinity_group.end()) {
-    return;
-  }
+std::string Sched_affinity_manager_numa::take_group_snapshot() {
   const Lock_guard lock(m_mutex);
-  int used_buff_size = 0;
-  for (auto sched_affinity_group :
-       m_sched_affinity_group[Thread_type::FOREGROUND]) {
-    int used = snprintf(buff + used_buff_size, buff_size - used_buff_size,
-                        "%d/%d; ", sched_affinity_group.assigned_thread_num,
-                        sched_affinity_group.avail_cpu_num);
-    if (used > 0) {
-      used_buff_size += used;
+  std::string group_snapshot = "";
+  for (const auto &thread_type : thread_types) {
+    if (!is_thread_sched_enabled(thread_type)) {
+      continue;
     }
-    if (used_buff_size + 1 >= buff_size) {
-      break;
+    group_snapshot += thread_type_names.at(thread_type) + ": ";
+    for (auto sched_affinity_group : m_sched_affinity_group[thread_type]) {
+      group_snapshot +=
+          (std::to_string(sched_affinity_group.assigned_thread_num) +
+           std::string("/") +
+           std::to_string(sched_affinity_group.avail_cpu_num) +
+           std::string("; "));
     }
   }
+  return group_snapshot;
 }
 
 int Sched_affinity_manager_numa::get_total_node_number() {
@@ -360,11 +354,8 @@ std::pair<std::string, bool> Sched_affinity_manager_numa::normalize_cpu_string(
 #endif /* HAVE_LIBNUMA */
 
 namespace sched_affinity {
-void Sched_affinity_manager_dummy::take_snapshot(char *buff, int buff_size) {
-  if (buff == nullptr || buff_size <= 0) {
-    return;
-  }
-  buff[0] = '\0';
+std::string Sched_affinity_manager_dummy::take_group_snapshot() {
+  return std::string();
 }
 
 static Sched_affinity_manager *sched_affinity_manager = nullptr;
@@ -403,9 +394,6 @@ void Sched_affinity_manager::free_instance() {
   }
 }
 
-pid_t gettid()
-{
-  return static_cast<pid_t>(syscall(SYS_gettid));
-}
+pid_t gettid() { return static_cast<pid_t>(syscall(SYS_gettid)); }
 
 }  // namespace sched_affinity

@@ -8209,8 +8209,9 @@ static int show_queries(THD *thd, SHOW_VAR *var, char *) {
 static int show_sched_affinity_status(THD *, SHOW_VAR *var, char *buff) {
   var->type = SHOW_CHAR;
   var->value = buff;
-  sched_affinity::Sched_affinity_manager::get_instance()->take_snapshot(
-      buff, SHOW_VAR_FUNC_BUFF_SIZE + 1);
+  std::string group_snapshot = sched_affinity::Sched_affinity_manager::get_instance()->take_group_snapshot();
+  strncpy(buff, group_snapshot.c_str(), SHOW_VAR_FUNC_BUFF_SIZE);
+  buff[SHOW_VAR_FUNC_BUFF_SIZE]='\0';
   return 0;
 }
 

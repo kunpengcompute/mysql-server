@@ -53,7 +53,7 @@ class Sched_affinity_manager {
   virtual bool unregister_thread(const Thread_type thread_type,
                                  const pid_t pid) = 0;
   virtual bool rebalance_group(const Thread_type thread_type) = 0;
-  virtual void take_snapshot(char *buff, int buff_size) = 0;
+  virtual std::string take_group_snapshot() = 0;
   virtual int get_total_node_number() = 0;
   virtual int get_cpu_number_per_node() = 0;
   virtual bool check_cpu_string(const std::string &cpu_string) = 0;
@@ -77,7 +77,7 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
     return true;
   }
   bool rebalance_group(const Thread_type) { return true; }
-  void take_snapshot(char *buff, int buff_size) override;
+  std::string take_group_snapshot() override;
   int get_total_node_number() override { return -1; }
   int get_cpu_number_per_node() override { return -1; }
   bool check_cpu_string(const std::string &) override { return true; }
@@ -112,7 +112,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   bool unregister_thread(const Thread_type thread_type,
                          const pid_t pid) override;
   bool rebalance_group(const Thread_type thread_type) override;
-  void take_snapshot(char *buff, int buff_size) override;
+  std::string take_group_snapshot() override;
   int get_total_node_number() override;
   int get_cpu_number_per_node() override;
   bool check_cpu_string(const std::string &cpu_string) override;

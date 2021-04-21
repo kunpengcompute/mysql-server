@@ -6,3 +6,4 @@ SHOW VARIABLES LIKE 'sched_affinity_log_flush_notifier';
 SHOW VARIABLES LIKE 'sched_affinity_log_closer';
 SHOW VARIABLES LIKE 'sched_affinity_log_checkpointer';
 SHOW VARIABLES LIKE 'sched_affinity_purge_coordinator';
+SHOW VARIABLES LIKE 'sched_affinity_numa_aware';
