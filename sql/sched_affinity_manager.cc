@@ -164,8 +164,9 @@ bool Sched_affinity_manager_numa::init_sched_affinity_group(
   return true;
 }
 
-bool Sched_affinity_manager_numa::rebalance_group(
-    const Thread_type thread_type) {
+bool Sched_affinity_manager_numa::rebalance_group(const char *,
+                                                  const Thread_type thread_type,
+                                                  const bool numa_aware) {
   const Lock_guard lock(m_mutex);
   // TODO
   return true;
