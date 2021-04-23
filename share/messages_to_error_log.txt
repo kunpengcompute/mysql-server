@@ -2798,33 +2798,6 @@ ER_RPL_GTID_MODE_REQUIRES_ENFORCE_GTID_CONSISTENCY_ON
 ER_WARN_NO_SERVERID_SPECIFIED
   eng "You have not provided a mandatory server-id. Servers in a replication topology must have unique server-ids. Please refer to the proper server start-up parameters documentation."
 
-ER_CANT_PARSE_CPU_STRING
-  eng "Cannot parse cpu string '%s'."
-
-ER_LIBNUMA_TEST_FAIL
-  eng "libnuma test fail."
-
-ER_NUMA_AVAILABLE_TEST_FAIL
-  eng "numa_available test fail."
-
-ER_CANNOT_SET_THREAD_SCHED_AFFINIFY
-  eng "Cannot set thread %s sched affinity."
-
-ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY
-  eng "Cannot unset thread %s sched affinity."
-
-ER_USE_DUMMY_SCHED_AFFINITY_MANAGER
-  eng "use dummy sched_affinity_manager."
-
-ER_SCHED_AFFINITY_THREAD_PROCESS_CONFLICT
-  eng "Found sched affinity conflict between threads and process."
-
-ER_SCHED_AFFINITY_FOREGROUND_BACKGROUND_CONFLICT
-  eng "Found sched affinity conflict between foreground threads and background threads."
-
-ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER
-  eng "Cannot create sched affinity manager."
-
 ER_ABORTING_USER_CONNECTION
   eng "Aborted connection %u to db: '%-.192s' user: '%-.48s' host: '%-.255s' (%-.64s)."
 
@@ -10853,6 +10826,39 @@ ER_INVALID_XPLUGIN_SOCKET_SAME_AS_SERVER
 
 ER_INNODB_UNABLE_TO_ACQUIRE_DD_OBJECT
   eng "%s"
+
+ER_CANT_PARSE_CPU_STRING
+  eng "Cannot parse cpu string '%s'."
+
+ER_LIBNUMA_TEST_FAIL
+  eng "libnuma test fail."
+
+ER_NUMA_AVAILABLE_TEST_FAIL
+  eng "numa_available test fail."
+
+ER_CANNOT_SET_THREAD_SCHED_AFFINIFY
+  eng "Cannot set thread %s sched affinity."
+
+ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY
+  eng "Cannot unset thread %s sched affinity."
+
+ER_CANNOT_REGISTER_THREAD_TO_SCHED_AFFINIFY_MANAGER
+  eng "Cannot register thread %s sched affinity manager."
+
+ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER
+  eng "Cannot unregister thread %s sched affinity manager."
+
+ER_USE_DUMMY_SCHED_AFFINITY_MANAGER
+  eng "use dummy sched_affinity_manager."
+
+ER_SCHED_AFFINITY_THREAD_PROCESS_CONFLICT
+  eng "Found sched affinity conflict between threads and process."
+
+ER_SCHED_AFFINITY_FOREGROUND_BACKGROUND_CONFLICT
+  eng "Found sched affinity conflict between foreground threads and background threads."
+
+ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER
+  eng "Cannot create sched affinity manager."
 
 # DO NOT add server-to-client messages here;
 # they go in messages_to_clients.txt

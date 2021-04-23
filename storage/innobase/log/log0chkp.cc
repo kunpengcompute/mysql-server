@@ -963,7 +963,7 @@ void log_checkpointer(log_t *log_ptr) {
       !(is_registered_to_sched_affinity =
             sched_affinity_manager->register_thread(
                 sched_affinity::Thread_type::LOG_CHECKPOINTER, pid))) {
-    ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_checkpointer");
+    ib::error(ER_CANNOT_REGISTER_THREAD_TO_SCHED_AFFINIFY_MANAGER, "log_checkpointer");
   }
 
   ut_a(log_ptr != nullptr);
@@ -1033,7 +1033,7 @@ void log_checkpointer(log_t *log_ptr) {
   if (is_registered_to_sched_affinity &&
       !sched_affinity_manager->unregister_thread(
           sched_affinity::Thread_type::LOG_CHECKPOINTER, pid)) {
-    ib::error(ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "log_checkpointer");
+    ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_checkpointer");
   }
 }
 

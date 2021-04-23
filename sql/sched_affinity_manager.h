@@ -21,6 +21,7 @@ for more details.
 #include <string>
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include <unistd.h>
 
@@ -40,6 +41,8 @@ enum class Thread_type {
   UNDEFINED
 };
 
+extern const std::map<Thread_type, std::string> thread_type_names;
+
 pid_t gettid();
 
 class Sched_affinity_manager {
@@ -52,7 +55,7 @@ class Sched_affinity_manager {
                                const pid_t pid) = 0;
   virtual bool unregister_thread(const Thread_type thread_type,
                                  const pid_t pid) = 0;
-  virtual bool rebalance_group(const char *, const Thread_type &) = 0;
+  virtual bool rebalance_group(const char *cpu_string, const Thread_type thread_type) = 0;
   virtual std::string take_group_snapshot() = 0;
   virtual int get_total_node_number() = 0;
   virtual int get_cpu_number_per_node() = 0;
@@ -76,7 +79,7 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   bool unregister_thread(const Thread_type, const pid_t) override {
     return true;
   }
-  bool rebalance_group(const char *, const Thread_type &) { return true; }
+  bool rebalance_group(const char *, const Thread_type) { return true; }
   std::string take_group_snapshot() override;
   int get_total_node_number() override { return -1; }
   int get_cpu_number_per_node() override { return -1; }
@@ -93,11 +96,26 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
 
 #ifdef HAVE_LIBNUMA
 
+struct Bitmask_deleter {
+  void operator()(bitmask *ptr) {
+    if (ptr != nullptr) {
+      numa_free_cpumask(ptr);
+    }
+  }
+};
+
+using Bitmask_shared_ptr = std::shared_ptr<bitmask>;
+
 struct Sched_affinity_group {
-  bitmask *avail_cpu_mask;
+  Bitmask_shared_ptr avail_cpu_mask;
   int avail_cpu_num;
   int assigned_thread_num;
 };
+
+Bitmask_shared_ptr get_bitmask_shared_ptr(bitmask* ptr)
+{
+  return Bitmask_shared_ptr(ptr, Bitmask_deleter());
+}
 
 class Sched_affinity_manager_numa : public Sched_affinity_manager {
  public:
@@ -111,7 +129,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   bool register_thread(const Thread_type thread_type, const pid_t pid) override;
   bool unregister_thread(const Thread_type thread_type,
                          const pid_t pid) override;
-  bool rebalance_group(const char *, const Thread_type &) override;
+  bool rebalance_group(const char *cpu_string, const Thread_type thread_type) override;
   std::string take_group_snapshot() override;
   int get_total_node_number() override;
   int get_cpu_number_per_node() override;
@@ -122,8 +140,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   ~Sched_affinity_manager_numa();
   bool init(const std::map<Thread_type, const char *> &, bool) override;
   bool init_sched_affinity_info(const std::string &cpu_string,
-                                       bitmask *&group_bitmask);
-  bool init_sched_affinity_group(const bitmask *group_bitmask,
+                                       Bitmask_shared_ptr &group_bitmask);
+  bool init_sched_affinity_group(const Bitmask_shared_ptr &group_bitmask,
                                         const bool numa_aware,
                                         std::vector<Sched_affinity_group> &sched_affinity_group);
   bool is_thread_sched_enabled(const Thread_type thread_type);
@@ -132,7 +150,6 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   void copy_group_thread(std::set<pid_t> &, std::map<pid_t, int> &,
                          std::vector<std::set<pid_t>> &);
   Thread_type get_thread_type_by_pid(const pid_t pid);
-  bool are_bitmasks_overlapped(bitmask *, bitmask *);
   static std::pair<std::string, bool> normalize_cpu_string(
       const std::string &cpu_string);
   friend class Sched_affinity_manager;
@@ -146,7 +163,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   pid_t m_root_pid;
   std::map<Thread_type, std::vector<Sched_affinity_group>>
       m_sched_affinity_groups;
-  std::map<Thread_type, bitmask *> m_thread_bitmask;
+  std::map<Thread_type, Bitmask_shared_ptr> m_thread_bitmask;
   std::map<Thread_type, std::set<pid_t>> m_thread_pid;
   std::map<pid_t, int> m_pid_group_id;
   mysql_mutex_t m_mutex;

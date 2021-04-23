@@ -3021,7 +3021,7 @@ void srv_purge_coordinator_thread() {
       !(is_registered_to_sched_affinity =
             sched_affinity_manager->register_thread(
                 sched_affinity::Thread_type::PURGE_COORDINATOR, pid))) {
-    ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "purge_coordinator");
+    ib::error(ER_CANNOT_REGISTER_THREAD_TO_SCHED_AFFINIFY_MANAGER, "purge_coordinator");
   }
 
   srv_slot_t *slot;
@@ -3140,7 +3140,7 @@ void srv_purge_coordinator_thread() {
   if (is_registered_to_sched_affinity &&
       !sched_affinity_manager->unregister_thread(
           sched_affinity::Thread_type::PURGE_COORDINATOR, pid)) {
-    ib::error(ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "purge_coordinator");
+    ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "purge_coordinator");
   }
 }
 

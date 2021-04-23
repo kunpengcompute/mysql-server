@@ -285,6 +285,12 @@ INSERT INTO global_suppressions VALUES
  */
  ("The transaction owned GTID is already in the gtid_executed table"),
 
+/*
+   sched affinity
+*/
+ ("libnuma test fail."),
+ ("numa_available test fail."),
+
  ("THE_LAST_SUPPRESSION");
 
 

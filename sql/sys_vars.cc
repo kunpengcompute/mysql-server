@@ -1409,108 +1409,162 @@ std::map<sched_affinity::Thread_type, const char *> sched_affinity_parameter = {
     {sched_affinity::Thread_type::LOG_CHECKPOINTER, nullptr},
     {sched_affinity::Thread_type::PURGE_COORDINATOR, nullptr}};
 
-static bool on_sched_affinity_foreground_thread_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::FOREGROUND], 
-                            sched_affinity::Thread_type::FOREGROUND);
+static bool check_sched_affinity_parameter(sys_var *, THD *, set_var *var) {
+  char *c = var->save_result.string_value.str;
+  if (sched_affinity::Sched_affinity_manager::get_instance() != nullptr &&
+      c != nullptr &&
+      !sched_affinity::Sched_affinity_manager::get_instance()->check_cpu_string(
+          std::string(c))) {
+    my_error(ER_INVALID_CPU_STRING, MYF(0), c);
+    return true;
+  }
+  return false;
+}
+
+static bool on_sched_affinity_foreground_thread_update(sys_var *, THD *,
+                                                       enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::FOREGROUND],
+          sched_affinity::Thread_type::FOREGROUND)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::FOREGROUND).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_foreground_thread(
     "sched_affinity_foreground_thread",
     "The set of cpus which foreground threads will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::FOREGROUND]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_foreground_thread_update));
 
-static bool on_sched_affinity_log_writer_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::LOG_WRITER], 
-                            sched_affinity::Thread_type::LOG_WRITER);
+static bool on_sched_affinity_log_writer_update(sys_var *, THD *,
+                                                enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::LOG_WRITER],
+          sched_affinity::Thread_type::LOG_WRITER)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::LOG_WRITER).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_log_writer(
     "sched_affinity_log_writer",
     "The set of cpus which log writer thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::LOG_WRITER]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_log_writer_update));
 
-static bool on_sched_affinity_log_flusher_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::LOG_FLUSHER], 
-                            sched_affinity::Thread_type::LOG_FLUSHER);
+static bool on_sched_affinity_log_flusher_update(sys_var *, THD *, enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::LOG_FLUSHER],
+          sched_affinity::Thread_type::LOG_FLUSHER)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::LOG_FLUSHER).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_log_flusher(
     "sched_affinity_log_flusher",
     "The set of cpus which log flusher thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::LOG_FLUSHER]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_log_flusher_update));
 
-static bool on_sched_affinity_log_write_notifier_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::LOG_WRITE_NOTIFIER], 
-                            sched_affinity::Thread_type::LOG_WRITE_NOTIFIER);
+static bool on_sched_affinity_log_write_notifier_update(sys_var *, THD *, enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::LOG_WRITE_NOTIFIER],
+          sched_affinity::Thread_type::LOG_WRITE_NOTIFIER)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_log_write_notifier(
     "sched_affinity_log_write_notifier",
     "The set of cpus which log write notifier thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::LOG_WRITE_NOTIFIER]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_log_write_notifier_update));
 
-static bool on_sched_affinity_log_flush_notifier_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER], 
-                            sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER);
+static bool on_sched_affinity_log_flush_notifier_update(sys_var *, THD *, enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER],
+          sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_log_flush_notifier(
     "sched_affinity_log_flush_notifier",
     "The set of cpus which log flush notifier thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_log_flush_notifier_update));
 
-static bool on_sched_affinity_log_closer_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::LOG_CLOSER], 
-                            sched_affinity::Thread_type::LOG_CLOSER);
+static bool on_sched_affinity_log_closer_update(sys_var *, THD *, enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::LOG_CLOSER],
+          sched_affinity::Thread_type::LOG_CLOSER)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::LOG_CLOSER).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_log_closer(
     "sched_affinity_log_closer",
     "The set of cpus which log closer thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::LOG_CLOSER]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_log_closer_update));
 
-static bool on_sched_affinity_log_checkpointer_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::LOG_CHECKPOINTER], 
-                            sched_affinity::Thread_type::LOG_CHECKPOINTER);
+static bool on_sched_affinity_log_checkpointer_update(sys_var *, THD *, enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::LOG_CHECKPOINTER],
+          sched_affinity::Thread_type::LOG_CHECKPOINTER)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::LOG_CHECKPOINTER).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_log_checkpointer(
     "sched_affinity_log_checkpointer",
     "The set of cpus which log checkpointer thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::LOG_CHECKPOINTER]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_log_checkpointer_update));
 
-static bool on_sched_affinity_purge_coordinator_update(sys_var *, THD *thd, enum_var_type) {
-  return !sched_affinity::Sched_affinity_manager::get_instance()->
-            rebalance_group(sched_affinity_parameter[sched_affinity::Thread_type::PURGE_COORDINATOR], 
-                            sched_affinity::Thread_type::PURGE_COORDINATOR);
+static bool on_sched_affinity_purge_coordinator_update(sys_var *, THD *, enum_var_type) {
+  if (!sched_affinity::Sched_affinity_manager::get_instance()->rebalance_group(
+          sched_affinity_parameter[sched_affinity::Thread_type::PURGE_COORDINATOR],
+          sched_affinity::Thread_type::PURGE_COORDINATOR)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_PARAMETER, MYF(0),
+             sched_affinity::thread_type_names.at(sched_affinity::Thread_type::PURGE_COORDINATOR).c_str());
+    return true;
+  }
+  return false;
 }
 
 static Sys_var_charptr Sys_sched_affinity_purge_coordinator(
     "sched_affinity_purge_coordinator",
     "The set of cpus which purge coordinator thread will run on.",
     GLOBAL_VAR(sched_affinity_parameter[sched_affinity::Thread_type::PURGE_COORDINATOR]), CMD_LINE(REQUIRED_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr),
+    IN_FS_CHARSET, DEFAULT(nullptr), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_sched_affinity_parameter),
     ON_UPDATE(on_sched_affinity_purge_coordinator_update));
 
 static const char *session_track_gtids_names[] = {"OFF", "OWN_GTID",

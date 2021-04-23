@@ -94,3 +94,7 @@ while ($i<$connection_number)
   SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
   --inc $i
 }
+
+SET GLOBAL sched_affinity_foreground_thread='0-1';
+--error ER_INVALID_CPU_STRING
+SET GLOBAL sched_affinity_foreground_thread='???';

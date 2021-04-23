@@ -305,7 +305,7 @@ static void *handle_connection(void *arg) {
         !(is_registered_to_sched_affinity =
               sched_affinity_manager->register_thread(
                   sched_affinity::Thread_type::FOREGROUND, pid))) {
-      LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "foreground");
+      LogErr(ERROR_LEVEL, ER_CANNOT_REGISTER_THREAD_TO_SCHED_AFFINIFY_MANAGER, "foreground");
     }
 
     if (thd_prepare_connection(thd))
@@ -321,7 +321,7 @@ static void *handle_connection(void *arg) {
     if (is_registered_to_sched_affinity &&
         !sched_affinity_manager->unregister_thread(
             sched_affinity::Thread_type::FOREGROUND, pid)) {
-      LogErr(ERROR_LEVEL, ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "foreground");
+      LogErr(ERROR_LEVEL, ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "foreground");
     }
 
     thd->get_stmt_da()->reset_diagnostics_area();
