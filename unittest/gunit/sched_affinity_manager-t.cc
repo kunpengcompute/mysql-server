@@ -93,7 +93,7 @@ class SchedAffinityManagerTest : public ::testing::Test {
 
   static std::map<Thread_type, std::vector<Sched_affinity_group>>
       &get_m_sched_affinity_group(Sched_affinity_manager_numa &instance) {
-    return instance.m_sched_affinity_group;
+    return instance.m_sched_affinity_groups;
   }
 
   static std::map<pid_t, int> &get_m_pid_group_id(
@@ -915,10 +915,9 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
   }
 
   std::string new_cpu_string = std::to_string(cpu0_index) + "," +
-                               std::to_string(cpu1_index) + "," +
+                               std::to_string(cpu1_index) + "-" +
                                std::to_string(cpu1_index + 2);
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND,
-                            true);
+  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
   // TODO this test is expected to fail until rebalance_group is implemented.
 
@@ -936,8 +935,7 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
 
   new_cpu_string =
       std::to_string(cpu0_index) + "-" + std::to_string(cpu0_index + 3);
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND,
-                            true);
+  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
   ASSERT_EQ(test_process_node_num, m_sched_affinity_groups[Thread_type::FOREGROUND].size());
   ASSERT_EQ(4,
@@ -952,15 +950,9 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
       m_sched_affinity_groups[Thread_type::FOREGROUND][1].assigned_thread_num);
 
   new_cpu_string = "";
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND,
-                            true);
+  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
-  ASSERT_EQ(1, m_sched_affinity_groups[Thread_type::FOREGROUND].size());
-  ASSERT_EQ(test_process_cpu_num,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][0].avail_cpu_num);
-  ASSERT_EQ(
-      8,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][0].assigned_thread_num);
+  ASSERT_FALSE(invoke_is_thread_sched_enabled(*true_type_instance, Thread_type::FOREGROUND));
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),

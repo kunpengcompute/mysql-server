@@ -52,8 +52,7 @@ class Sched_affinity_manager {
                                const pid_t pid) = 0;
   virtual bool unregister_thread(const Thread_type thread_type,
                                  const pid_t pid) = 0;
-  virtual bool rebalance_group(const char *, const Thread_type thread_type,
-                               const bool numa_aware) = 0;
+  virtual bool rebalance_group(const char *, const Thread_type &) = 0;
   virtual std::string take_group_snapshot() = 0;
   virtual int get_total_node_number() = 0;
   virtual int get_cpu_number_per_node() = 0;
@@ -77,7 +76,7 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   bool unregister_thread(const Thread_type, const pid_t) override {
     return true;
   }
-  bool rebalance_group(const char *, const Thread_type, const bool) { return true; }
+  bool rebalance_group(const char *, const Thread_type &) { return true; }
   std::string take_group_snapshot() override;
   int get_total_node_number() override { return -1; }
   int get_cpu_number_per_node() override { return -1; }
@@ -112,8 +111,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   bool register_thread(const Thread_type thread_type, const pid_t pid) override;
   bool unregister_thread(const Thread_type thread_type,
                          const pid_t pid) override;
-  bool rebalance_group(const char *, const Thread_type thread_type,
-                       const bool numa_aware) override;
+  bool rebalance_group(const char *, const Thread_type &) override;
   std::string take_group_snapshot() override;
   int get_total_node_number() override;
   int get_cpu_number_per_node() override;
@@ -131,6 +129,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   bool is_thread_sched_enabled(const Thread_type thread_type);
   bool bind_to_group(const pid_t pid);
   bool unbind_from_group(const pid_t pid);
+  void copy_group_thread(std::set<pid_t> &, std::map<pid_t, int> &,
+                         std::vector<std::set<pid_t>> &);
   Thread_type get_thread_type_by_pid(const pid_t pid);
   bool are_bitmasks_overlapped(bitmask *, bitmask *);
   static std::pair<std::string, bool> normalize_cpu_string(
@@ -142,8 +142,10 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   int m_total_cpu_num;
   int m_total_node_num;
   int m_cpu_num_per_node;
+  bool m_numa_aware;
+  pid_t m_root_pid;
   std::map<Thread_type, std::vector<Sched_affinity_group>>
-      m_sched_affinity_group;
+      m_sched_affinity_groups;
   std::map<Thread_type, bitmask *> m_thread_bitmask;
   std::map<Thread_type, std::set<pid_t>> m_thread_pid;
   std::map<pid_t, int> m_pid_group_id;
