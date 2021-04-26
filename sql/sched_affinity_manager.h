@@ -25,6 +25,10 @@ for more details.
 
 #include <unistd.h>
 
+#ifdef GMOCK_FOUND
+#include "gtest/gtest_prod.h"
+#endif
+
 #include "mysql/psi/mysql_mutex.h"
 
 namespace sched_affinity {
@@ -72,9 +76,9 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   Sched_affinity_manager_dummy(const Sched_affinity_manager_dummy &) = delete;
   Sched_affinity_manager_dummy &operator=(
       const Sched_affinity_manager_dummy &) = delete;
-  Sched_affinity_manager_dummy(const Sched_affinity_manager_dummy &&) = delete;
-  Sched_affinity_manager_dummy &operator=(
-      const Sched_affinity_manager_dummy &&) = delete;
+  Sched_affinity_manager_dummy(Sched_affinity_manager_dummy &&) = delete;
+  Sched_affinity_manager_dummy &operator=(Sched_affinity_manager_dummy &&) =
+      delete;
   bool register_thread(const Thread_type, const pid_t) override { return true; }
   bool unregister_thread(const Thread_type, const pid_t) override {
     return true;
@@ -112,18 +116,15 @@ struct Sched_affinity_group {
   int assigned_thread_num;
 };
 
-Bitmask_shared_ptr get_bitmask_shared_ptr(bitmask* ptr)
-{
-  return Bitmask_shared_ptr(ptr, Bitmask_deleter());
-}
+Bitmask_shared_ptr get_bitmask_shared_ptr(bitmask* ptr);
 
 class Sched_affinity_manager_numa : public Sched_affinity_manager {
  public:
   Sched_affinity_manager_numa(const Sched_affinity_manager_numa &) = delete;
   Sched_affinity_manager_numa &operator=(const Sched_affinity_manager_numa &) =
       delete;
-  Sched_affinity_manager_numa(const Sched_affinity_manager_numa &&) = delete;
-  Sched_affinity_manager_numa &operator=(const Sched_affinity_manager_numa &&) =
+  Sched_affinity_manager_numa(Sched_affinity_manager_numa &&) = delete;
+  Sched_affinity_manager_numa &operator=(Sched_affinity_manager_numa &&) =
       delete;
 
   bool register_thread(const Thread_type thread_type, const pid_t pid) override;
@@ -152,8 +153,6 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   Thread_type get_thread_type_by_pid(const pid_t pid);
   static std::pair<std::string, bool> normalize_cpu_string(
       const std::string &cpu_string);
-  friend class Sched_affinity_manager;
-  friend class SchedAffinityManagerTest;
 
  private:
   int m_total_cpu_num;
@@ -167,6 +166,29 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   std::map<Thread_type, std::set<pid_t>> m_thread_pid;
   std::map<pid_t, int> m_pid_group_id;
   mysql_mutex_t m_mutex;
+
+  friend class Sched_affinity_manager;
+
+  friend class SchedAffinityManagerTest;
+#ifdef FRIEND_TEST
+  FRIEND_TEST(SchedAffinityManagerTest, TakeGroupSnapshot);
+  FRIEND_TEST(SchedAffinityManagerTest, InitSchedAffinityInfo);
+  FRIEND_TEST(SchedAffinityManagerTest, InitSchedAffinityGroup);
+  FRIEND_TEST(SchedAffinityManagerTest, NormalizeCpuString);
+  FRIEND_TEST(SchedAffinityManagerTest, AllNullptrConfig);
+  FRIEND_TEST(SchedAffinityManagerTest, EmptyStringConfig);
+  FRIEND_TEST(SchedAffinityManagerTest, EmptyContainerConfig);
+  FRIEND_TEST(SchedAffinityManagerTest, BindToGroup);
+  FRIEND_TEST(SchedAffinityManagerTest, UnbindFromGroup);
+  FRIEND_TEST(SchedAffinityManagerTest, GetThreadTypeByPid);
+  FRIEND_TEST(SchedAffinityManagerTest, RegisterThread);
+  FRIEND_TEST(SchedAffinityManagerTest, UnregisterThread);
+  FRIEND_TEST(SchedAffinityManagerTest, NumaAwareDisabled);
+  FRIEND_TEST(SchedAffinityManagerTest, NumaAwareEnabled);
+  FRIEND_TEST(SchedAffinityManagerTest, RebalanceGroup);
+  FRIEND_TEST(SchedAffinityManagerTest, IsThreadSchedEnabled);
+#endif
+
 };
 #endif /* HAVE_LIBNUMA */
 }  // namespace sched_affinity

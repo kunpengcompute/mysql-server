@@ -337,4 +337,6 @@
 
 #define SO_EXT "@CMAKE_SHARED_MODULE_SUFFIX@"
 
+#cmakedefine GMOCK_FOUND 1
+
 #endif

@@ -54,12 +54,13 @@ class Lock_guard {
 };
 
 Sched_affinity_manager_numa::Sched_affinity_manager_numa()
-    : Sched_affinity_manager() {
+    : Sched_affinity_manager(),
+      m_total_cpu_num(0),
+      m_total_node_num(0),
+      m_cpu_num_per_node(0),
+      m_numa_aware(false),
+      m_root_pid(0) {
   mysql_mutex_init(key_sched_affinity_mutex, &m_mutex, nullptr);
-
-  m_total_cpu_num = 0;
-  m_total_node_num = 0;
-  m_cpu_num_per_node = 0;
 }
 
 Sched_affinity_manager_numa::~Sched_affinity_manager_numa() {
@@ -73,6 +74,7 @@ bool Sched_affinity_manager_numa::init(
   m_total_node_num = numa_num_configured_nodes();
   m_cpu_num_per_node = m_total_cpu_num / m_total_node_num;
   m_numa_aware = numa_aware;
+  m_root_pid = gettid();
 
   m_thread_bitmask.clear();
   m_sched_affinity_groups.clear();
@@ -84,9 +86,9 @@ bool Sched_affinity_manager_numa::init(
     }
     m_thread_pid[thread_type] = std::set<pid_t>();
     auto cpu_string = sched_affinity_parameter.at(thread_type);
-    if (cpu_string != nullptr &&
-        !init_sched_affinity_info(std::string(cpu_string),
-                                  m_thread_bitmask[thread_type])) {
+    if (!init_sched_affinity_info(
+            cpu_string == nullptr ? std::string("") : std::string(cpu_string),
+            m_thread_bitmask[thread_type])) {
       return false;
     }
     if (is_thread_sched_enabled(thread_type) &&
@@ -163,7 +165,9 @@ bool Sched_affinity_manager_numa::rebalance_group(const char *cpu_string,
   copy_group_thread(m_thread_pid[thread_type], m_pid_group_id, group_thread);
   const bool is_previous_sched_enabled = is_thread_sched_enabled(thread_type);
 
-  if(!init_sched_affinity_info(cpu_string, m_thread_bitmask[thread_type])) {
+  if (!init_sched_affinity_info(
+          cpu_string == nullptr ? std::string("") : std::string(cpu_string),
+          m_thread_bitmask[thread_type])) {
     return false;
   }
   if (is_thread_sched_enabled(thread_type) &&
@@ -480,5 +484,10 @@ void Sched_affinity_manager::free_instance() {
 }
 
 pid_t gettid() { return static_cast<pid_t>(syscall(SYS_gettid)); }
+
+Bitmask_shared_ptr get_bitmask_shared_ptr(bitmask* ptr)
+{
+  return Bitmask_shared_ptr(ptr, Bitmask_deleter());
+}
 
 }  // namespace sched_affinity
