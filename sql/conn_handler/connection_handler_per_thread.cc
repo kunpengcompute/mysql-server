@@ -319,8 +319,7 @@ static void *handle_connection(void *arg) {
     close_connection(thd, 0, false, false);
 
     if (is_registered_to_sched_affinity &&
-        !sched_affinity_manager->unregister_thread(
-            sched_affinity::Thread_type::FOREGROUND, pid)) {
+        !sched_affinity_manager->unregister_thread(pid)) {
       LogErr(ERROR_LEVEL, ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "foreground");
     }
 

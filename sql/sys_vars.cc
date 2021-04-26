@@ -1393,11 +1393,22 @@ static bool on_session_track_gtids_update(sys_var *, THD *thd, enum_var_type) {
 
 bool sched_affinity_numa_aware = false;
 
+static bool on_sched_affinity_numa_aware_update(sys_var *, THD *, enum_var_type)
+{
+  if (sched_affinity::Sched_affinity_manager::get_instance() != nullptr &&
+      !sched_affinity::Sched_affinity_manager::get_instance()
+           ->update_numa_aware(sched_affinity_numa_aware)) {
+    my_error(ER_CANNOT_UPDATE_SCHED_AFFINITY_NUMA_AWARE, MYF(0));
+    return true;
+  }
+  return false;
+}
+
 Sys_var_bool Sys_sched_affinity_numa_aware(
     "sched_affinity_numa_aware",
     "Schedule threads with numa information",
-    READ_ONLY GLOBAL_VAR(sched_affinity_numa_aware), CMD_LINE(OPT_ARG),
-    DEFAULT(false));
+    GLOBAL_VAR(sched_affinity_numa_aware), CMD_LINE(OPT_ARG),
+    DEFAULT(false), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr), ON_UPDATE(on_sched_affinity_numa_aware_update));
 
 std::map<sched_affinity::Thread_type, const char *> sched_affinity_parameter = {
     {sched_affinity::Thread_type::FOREGROUND, nullptr},

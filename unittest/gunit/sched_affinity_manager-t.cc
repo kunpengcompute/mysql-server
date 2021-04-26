@@ -680,7 +680,7 @@ TEST_F(SchedAffinityManagerTest, UnregisterThread) {
   }
 
   for (auto &thread_pid : thread_pids) {
-    instance->unregister_thread(Thread_type::FOREGROUND, thread_pid);
+    instance->unregister_thread(thread_pid);
   }
 
   ASSERT_EQ(0, m_thread_pid[Thread_type::FOREGROUND].size());
@@ -712,8 +712,8 @@ TEST_F(SchedAffinityManagerTest, NumaAwareDisabled) {
   auto true_type_instance =
       dynamic_cast<Sched_affinity_manager_numa *>(instance);
 
-  std::map<Thread_type, std::vector<Sched_affinity_group>>
-      &m_sched_affinity_groups = true_type_instance->m_sched_affinity_groups;
+  const auto &m_sched_affinity_groups =
+      true_type_instance->m_sched_affinity_groups;
 
   std::atomic<bool> is_stopped;
   std::vector<pid_t> thread_pids;
@@ -725,12 +725,12 @@ TEST_F(SchedAffinityManagerTest, NumaAwareDisabled) {
     instance->register_thread(Thread_type::FOREGROUND, thread_pid);
   }
 
-  ASSERT_EQ(1, m_sched_affinity_groups[Thread_type::FOREGROUND].size());
+  ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
   ASSERT_EQ(2,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][0].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(
       thread_number,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][0].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),
@@ -772,17 +772,17 @@ TEST_F(SchedAffinityManagerTest, NumaAwareEnabled) {
   }
 
   ASSERT_EQ(test_process_node_num,
-            m_sched_affinity_groups[Thread_type::FOREGROUND].size());
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
   ASSERT_EQ(2,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][0].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(2,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][1].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
   ASSERT_EQ(
       thread_number / 2,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][0].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
   ASSERT_EQ(
       thread_number / 2,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][1].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),
@@ -810,8 +810,8 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
   auto true_type_instance =
       dynamic_cast<Sched_affinity_manager_numa *>(instance);
 
-  std::map<Thread_type, std::vector<Sched_affinity_group>> &
-      m_sched_affinity_groups = true_type_instance->m_sched_affinity_groups;
+  const auto &m_sched_affinity_groups =
+      true_type_instance->m_sched_affinity_groups;
 
   std::atomic<bool> is_stopped;
   std::vector<pid_t> thread_pids;
@@ -828,33 +828,33 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
                                std::to_string(cpu1_index + 2);
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
-  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups[Thread_type::FOREGROUND].size());
+  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
   ASSERT_EQ(1,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][0].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(3,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][1].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
   ASSERT_EQ(
       2,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][0].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
   ASSERT_EQ(
       6,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][1].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
 
   new_cpu_string =
       std::to_string(cpu0_index) + "-" + std::to_string(cpu0_index + 3);
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
-  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups[Thread_type::FOREGROUND].size());
+  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
   ASSERT_EQ(4,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][0].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(0,
-            m_sched_affinity_groups[Thread_type::FOREGROUND][1].avail_cpu_num);
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
   ASSERT_EQ(
       8,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][0].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
   ASSERT_EQ(
       0,
-      m_sched_affinity_groups[Thread_type::FOREGROUND][1].assigned_thread_num);
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
 
   new_cpu_string = "";
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
@@ -900,6 +900,77 @@ TEST_F(SchedAffinityManagerTest, TakeGroupSnapshot) {
   snapshot = instance->take_group_snapshot();
   ASSERT_TRUE(snapshot.find(thread_type_names.at(Thread_type::FOREGROUND)) ==
               string::npos);
+
+  Sched_affinity_manager::free_instance();
+}
+
+TEST_F(SchedAffinityManagerTest, UpdateNumaAware) {
+  if (skip_if_numa_unavailable()) {
+    return;
+  }
+
+  ASSERT_GT(test_process_node_num, 1);
+
+  int cpu0_index = 0;
+  int cpu1_index = cpu_num_per_node;
+  std::string cpu_string =
+      std::to_string(cpu0_index) + "-" + std::to_string(cpu0_index + 1) + "," +
+      std::to_string(cpu1_index) + "-" + std::to_string(cpu1_index + 1);
+
+  std::map<sched_affinity::Thread_type, const char *> config = {
+      {sched_affinity::Thread_type::FOREGROUND, cpu_string.c_str()}};
+
+  auto instance = Sched_affinity_manager::create_instance(config, true);
+  auto true_type_instance =
+      dynamic_cast<Sched_affinity_manager_numa *>(instance);
+
+  const auto &m_sched_affinity_groups =
+      true_type_instance->m_sched_affinity_groups;
+  const auto &m_pid_group_id = true_type_instance->m_pid_group_id;
+
+  std::atomic<bool> is_stopped;
+  std::vector<pid_t> thread_pids;
+  std::vector<std::thread> threads;
+  int thread_number = 8;
+  start_threads(thread_number, threads, thread_pids, is_stopped);
+
+  for (auto &thread_pid : thread_pids) {
+    instance->register_thread(Thread_type::FOREGROUND, thread_pid);
+  }
+
+  auto &sched_affinity_group = m_sched_affinity_groups.at(Thread_type::FOREGROUND);
+
+  ASSERT_TRUE(instance->update_numa_aware(true));
+  ASSERT_TRUE(instance->update_numa_aware(false));
+  ASSERT_EQ(1, sched_affinity_group.size());
+  ASSERT_EQ(thread_number, m_pid_group_id.size());
+  ASSERT_EQ(thread_number, sched_affinity_group[0].assigned_thread_num);
+  ASSERT_TRUE(std::any_of(
+      m_pid_group_id.begin(), m_pid_group_id.end(),
+      [](const auto & pid_group_id) { return pid_group_id.second == 0; }));
+  ASSERT_TRUE(instance->update_numa_aware(false));
+
+  ASSERT_TRUE(instance->update_numa_aware(true));
+  ASSERT_EQ(test_process_node_num, sched_affinity_group.size());
+  ASSERT_EQ(thread_number, m_pid_group_id.size());
+  ASSERT_TRUE(std::any_of(
+      m_pid_group_id.begin(), m_pid_group_id.end(),
+      [](const auto & pid_group_id) {
+        return pid_group_id.second == 0 || pid_group_id.second == 1;
+      }));
+  for (auto i = 0; i < 2; ++i) {
+    ASSERT_EQ(2, sched_affinity_group[i].avail_cpu_num);
+    ASSERT_EQ(4, sched_affinity_group[i].assigned_thread_num);
+  }
+  for (auto i = 2; i < test_process_node_num; ++i) {
+    ASSERT_EQ(0, sched_affinity_group[i].avail_cpu_num);
+    ASSERT_EQ(0, sched_affinity_group[i].assigned_thread_num);
+  }
+
+  is_stopped.store(true);
+  std::for_each(threads.begin(), threads.end(),
+                [](std::thread &thread) { thread.join(); });
+  Sched_affinity_manager::free_instance();
 }
 
 } // namespace sched_affinity

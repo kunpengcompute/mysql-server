@@ -2058,8 +2058,7 @@ void log_writer(log_t *log_ptr) {
   log_writer_mutex_exit(log);
 
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::LOG_WRITER, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_writer");
   }
 }
@@ -2348,8 +2347,7 @@ void log_flusher(log_t *log_ptr) {
   log_flusher_mutex_exit(log);
 
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::LOG_FLUSHER, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_flusher");
   }
 }
@@ -2463,8 +2461,7 @@ void log_write_notifier(log_t *log_ptr) {
   log_write_notifier_mutex_exit(log);
 
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::LOG_WRITE_NOTIFIER, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_write_notifier");
   }
 }
@@ -2578,8 +2575,7 @@ void log_flush_notifier(log_t *log_ptr) {
   log_flush_notifier_mutex_exit(log);
 
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_flush_notifier");
   }
 }
@@ -2696,8 +2692,7 @@ void log_closer(log_t *log_ptr) {
   log_closer_mutex_exit(log);
 
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::LOG_CLOSER, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_closer");
   }
 }

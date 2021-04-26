@@ -1031,8 +1031,7 @@ void log_checkpointer(log_t *log_ptr) {
 
   log_checkpointer_mutex_exit(log);
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::LOG_CHECKPOINTER, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "log_checkpointer");
   }
 }

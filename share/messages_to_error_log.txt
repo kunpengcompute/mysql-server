@@ -10860,6 +10860,12 @@ ER_SCHED_AFFINITY_FOREGROUND_BACKGROUND_CONFLICT
 ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER
   eng "Cannot create sched affinity manager."
 
+ER_SET_FALLBACK_MODE
+  eng "sched_affinity_manager is set to fallback mode."
+
+ER_FALLBACK_DELEGATE_SCHED_AFFINITY_MANAGER_IS_CALLED
+  eng "sched_affinity_manager is in fallback mode. A fallback version of sched_affinity_manager is called, which does nothing."
+
 # DO NOT add server-to-client messages here;
 # they go in messages_to_clients.txt
 # in the same directory as this file.

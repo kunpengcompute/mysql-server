@@ -3138,8 +3138,7 @@ void srv_purge_coordinator_thread() {
   destroy_thd(thd);
 
   if (is_registered_to_sched_affinity &&
-      !sched_affinity_manager->unregister_thread(
-          sched_affinity::Thread_type::PURGE_COORDINATOR, pid)) {
+      !sched_affinity_manager->unregister_thread(pid)) {
     ib::error(ER_CANNOT_UNREGISTER_THREAD_FROM_SCHED_AFFINIFY_MANAGER, "purge_coordinator");
   }
 }
