@@ -154,9 +154,16 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   bool is_thread_sched_enabled(const Thread_type thread_type);
   bool bind_to_group(const pid_t pid);
   bool unbind_from_group(const pid_t pid);
-  void copy_group_thread(std::set<pid_t> &, std::map<pid_t, int> &,
-                         std::vector<std::set<pid_t>> &);
+
   bool copy_affinity(pid_t from, pid_t to);
+  bool reset_sched_affinity_info(const char *cpu_string, const Thread_type &,
+                                 std::vector<std::set<pid_t>> &);
+  void count_migrate_thread_num(const std::vector<std::set<pid_t>> &,
+                                std::vector<Sched_affinity_group> &,
+                                std::vector<int> &);
+  bool migrate_thread_and_setaffinity(const std::vector<std::set<pid_t>> &,
+                                      const std::vector<Sched_affinity_group> &,
+                                      std::vector<int> &);
   Thread_type get_thread_type_by_pid(const pid_t pid);
   static std::pair<std::string, bool> normalize_cpu_string(
       const std::string &cpu_string);

@@ -22,7 +22,7 @@ for more details.
 #ifdef HAVE_LIBNUMA
 namespace sched_affinity {
 
-const Thread_type thread_types[] = {
+extern const std::vector<Thread_type> thread_types = {
     Thread_type::FOREGROUND,         Thread_type::LOG_WRITER,
     Thread_type::LOG_FLUSHER,        Thread_type::LOG_WRITE_NOTIFIER,
     Thread_type::LOG_FLUSH_NOTIFIER, Thread_type::LOG_CLOSER,
@@ -171,112 +171,126 @@ bool Sched_affinity_manager_numa::rebalance_group(const char *cpu_string,
     return m_fallback_delegate->rebalance_group(cpu_string, thread_type);
   }
 
-  std::vector<std::set<pid_t>> group_thread;
-  int group_thread_init_size = m_numa_aware ? m_total_node_num : 1;
-  group_thread.resize(group_thread_init_size, std::set<pid_t>());
-  copy_group_thread(m_thread_pid[thread_type], m_pid_group_id, group_thread);
   const bool is_previous_sched_enabled = is_thread_sched_enabled(thread_type);
-
-  if (!init_sched_affinity_info(
-          cpu_string == nullptr ? std::string("") : std::string(cpu_string),
-          m_thread_bitmask[thread_type])) {
+  std::vector<std::set<pid_t>> group_thread;
+  if (!reset_sched_affinity_info(cpu_string, thread_type, group_thread)) {
     fallback();
     return false;
   }
-  if (is_thread_sched_enabled(thread_type) &&
-        !init_sched_affinity_group(m_thread_bitmask[thread_type], m_numa_aware,
-                                   m_sched_affinity_groups[thread_type])) {
+
+  if (!is_thread_sched_enabled(thread_type) && is_previous_sched_enabled) {
+    Bitmask_shared_ptr root_process_bitmask =
+        get_bitmask_shared_ptr(numa_allocate_cpumask());
+    if (numa_sched_getaffinity(m_root_pid, root_process_bitmask.get()) < 0) {
       fallback();
       return false;
-  }
-
-  // Sched_affinity switch now off, no matter what the previous status is
-  if (!is_thread_sched_enabled(thread_type)) {
-    if (is_previous_sched_enabled) {
-      Bitmask_shared_ptr root_process_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
-      bool error_flag = false;
-      if (numa_sched_getaffinity(m_root_pid, root_process_bitmask.get()) < 0) {
-        error_flag = true;
-      } else {
-        for (const auto tid : m_thread_pid[thread_type]) {
-          m_pid_group_id.erase(tid);
-          if (numa_sched_setaffinity(tid, root_process_bitmask.get()) < 0) {
-            error_flag = true;
-            break;
-          }
-        }
-      }
-
-      if (error_flag) {
-        fallback();
-        return false;
-      } else {
-        return true;
-      }
     }
-  }
-  // Sched_affinity switch from off to on
-  if (is_thread_sched_enabled(thread_type) && !is_previous_sched_enabled) {
     for (const auto tid : m_thread_pid[thread_type]) {
-      if(!bind_to_group(tid)) {
+      m_pid_group_id.erase(tid);
+      if (numa_sched_setaffinity(tid, root_process_bitmask.get()) < 0) {
         fallback();
         return false;
       }
     }
     return true;
   }
-  // Cpu range changed
-  auto &sched_affinity_group = m_sched_affinity_groups[thread_type];
-  int total_thread_num = 0;
-  int total_avail_cpu_num = 0;
-  for (auto i = 0; i < group_thread_init_size; ++i) {
-    total_thread_num += group_thread[i].size();
-    total_avail_cpu_num += sched_affinity_group[i].avail_cpu_num;
-  }
-  std::vector<int> migrate_thread_num;
-  migrate_thread_num.resize(group_thread_init_size);
-  for (auto i = 0; i < group_thread_init_size; ++i) {
-    sched_affinity_group[i].assigned_thread_num = std::ceil(static_cast<double>(total_thread_num * 
-                                                    sched_affinity_group[i].avail_cpu_num) / 
-                                                    total_avail_cpu_num);
-    if (sched_affinity_group[i].avail_cpu_num == 0) {
-      migrate_thread_num[i] = -group_thread[i].size();
-    } else {
-      migrate_thread_num[i] = sched_affinity_group[i].assigned_thread_num - 
-                              group_thread[i].size();
-    }
-  }
-  for (auto i = 0; i < group_thread_init_size; ++i) {
-    if (migrate_thread_num[i] >= 0) {
-      continue;
-    }
-    std::set<pid_t>::iterator it = group_thread[i].begin();
-    for (auto j = 0; j < group_thread_init_size; ++j) {
-      if (migrate_thread_num[i] >= 0) {
-        break;
-      } else if (migrate_thread_num[j] > 0) {
-        do {
-          m_pid_group_id[*it] = j;
-          if (numa_sched_setaffinity(*it, sched_affinity_group[j].avail_cpu_mask.get()) < 0) {
-            return false;
-          }
-          ++it;
-        } while (--migrate_thread_num[j] > 0 &&
-                 ++migrate_thread_num[i] < 0 &&
-                 it != group_thread[i].end());
+
+  if (is_thread_sched_enabled(thread_type) && !is_previous_sched_enabled) {
+    for (const auto tid : m_thread_pid[thread_type]) {
+      if (!bind_to_group(tid)) {
+        fallback();
+        return false;
       }
     }
+    return true;
+  }
+
+  auto &sched_affinity_group = m_sched_affinity_groups[thread_type];
+  std::vector<int> migrate_thread_num;
+  migrate_thread_num.resize(sched_affinity_group.size());
+  count_migrate_thread_num(group_thread, sched_affinity_group,
+                           migrate_thread_num);
+  if (!migrate_thread_and_setaffinity(group_thread, sched_affinity_group,
+                                     migrate_thread_num)) {
+    fallback();
+    return false;
   }
   return true;
 }
 
-void Sched_affinity_manager_numa::copy_group_thread(std::set<pid_t> &threadtype_pid_source,
-                                                    std::map<pid_t, int> &thread_group_source,
-                                                    std::vector<std::set<pid_t>> &destination) {
-  for (const auto tid : threadtype_pid_source) {
-    const auto group_index = thread_group_source[tid];
-    destination[group_index].insert(tid);
+bool Sched_affinity_manager_numa::reset_sched_affinity_info(
+                                          const char *cpu_string,
+                                          const Thread_type &thread_type,
+                                          std::vector<std::set<pid_t>> &group_thread){
+  group_thread.resize(m_numa_aware ? m_total_node_num : 1, std::set<pid_t>());
+  for (const auto tid : m_thread_pid[thread_type]) {
+    const auto group_index = m_pid_group_id[tid];
+    group_thread[group_index].insert(tid);
   }
+  if(!init_sched_affinity_info(
+        cpu_string == nullptr ? "" : std::string(cpu_string), 
+        m_thread_bitmask[thread_type])) {
+    return false;
+  }
+  if (is_thread_sched_enabled(thread_type) &&
+        !init_sched_affinity_group(m_thread_bitmask[thread_type], m_numa_aware,
+                                   m_sched_affinity_groups[thread_type])) {
+      return false;
+  }
+  return true;
+}
+
+void Sched_affinity_manager_numa::count_migrate_thread_num(
+                        const std::vector<std::set<pid_t>> &group_thread,
+                        std::vector<Sched_affinity_group> &sched_affinity_group,
+                        std::vector<int> &migrate_thread_num) {
+  int total_thread_num = 0;
+  int total_avail_cpu_num = 0;
+  for (auto i = 0u; i < sched_affinity_group.size(); ++i) {
+    total_thread_num += group_thread[i].size();
+    total_avail_cpu_num += sched_affinity_group[i].avail_cpu_num;
+  }
+  for (auto i = 0u; i < sched_affinity_group.size(); ++i) {
+    sched_affinity_group[i].assigned_thread_num = std::ceil(static_cast<double>(total_thread_num * 
+                                                    sched_affinity_group[i].avail_cpu_num) / 
+                                                    total_avail_cpu_num);
+    migrate_thread_num[i] = sched_affinity_group[i].assigned_thread_num - 
+                              group_thread[i].size();
+  }
+}
+
+bool Sched_affinity_manager_numa::migrate_thread_and_setaffinity(
+                                                  const std::vector<std::set<pid_t>> &group_thread,
+                                                  const std::vector<Sched_affinity_group> &sched_affinity_group,
+                                                  std::vector<int> &migrate_thread_num) {
+  for (auto i = 0u; i < group_thread.size(); ++i) {
+    for (auto tid : group_thread[i]) {
+      if (sched_affinity_group[i].avail_cpu_num != 0 && 
+            numa_sched_setaffinity(tid, sched_affinity_group[i].avail_cpu_mask.get()) < 0) {
+        return false;
+      }
+    } 
+  }
+  for (auto i = 0u; i < group_thread.size(); ++i) {
+    if (migrate_thread_num[i] >= 0) {
+      continue;
+    }
+    std::set<pid_t>::iterator it = group_thread[i].begin();
+    for (auto j = 0u; j < group_thread.size(); ++j) {
+      while (migrate_thread_num[j] > 0 && migrate_thread_num[i] < 0 &&
+             it != group_thread[i].end()) {
+        m_pid_group_id[*it] = j;
+        if (numa_sched_setaffinity(
+                *it, sched_affinity_group[j].avail_cpu_mask.get()) < 0) {
+          return false;
+        }
+        --migrate_thread_num[j];
+        ++migrate_thread_num[i];
+        ++it;
+      }
+    }
+  }
+  return true;
 }
 
 bool Sched_affinity_manager_numa::is_thread_sched_enabled(
@@ -442,7 +456,12 @@ int Sched_affinity_manager_numa::get_cpu_number_per_node() {
 
 bool Sched_affinity_manager_numa::check_cpu_string(
     const std::string &cpu_string) {
-  return normalize_cpu_string(cpu_string).second;
+  auto ret = normalize_cpu_string(cpu_string);
+  if (!ret.second) {
+    return false;
+  }
+  auto bitmask = get_bitmask_shared_ptr(numa_parse_cpustring(ret.first.c_str()));
+  return bitmask.get() != nullptr;
 }
 
 std::pair<std::string, bool> Sched_affinity_manager_numa::normalize_cpu_string(
