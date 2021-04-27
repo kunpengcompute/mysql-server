@@ -1137,6 +1137,28 @@ The following options may be given as the first argument:
  returning a warning.
  --safe-user-create  Don't allow new user creation by the user who has no
  write privileges to the mysql.user table.
+ --sched-affinity-foreground-thread=name 
+ The set of cpus which foreground threads will run on.
+ --sched-affinity-log-checkpointer=name 
+ The set of cpus which log checkpointer thread will run
+ on.
+ --sched-affinity-log-closer=name 
+ The set of cpus which log closer thread will run on.
+ --sched-affinity-log-flush-notifier=name 
+ The set of cpus which log flush notifier thread will run
+ on.
+ --sched-affinity-log-flusher=name 
+ The set of cpus which log flusher thread will run on.
+ --sched-affinity-log-write-notifier=name 
+ The set of cpus which log write notifier thread will run
+ on.
+ --sched-affinity-log-writer=name 
+ The set of cpus which log writer thread will run on.
+ --sched-affinity-numa-aware 
+ Schedule threads with numa information
+ --sched-affinity-purge-coordinator=name 
+ The set of cpus which purge coordinator thread will run
+ on.
  --schema-definition-cache=# 
  The number of cached schema definitions
  --secondary-engine-cost-threshold[=#] 
@@ -1706,6 +1728,15 @@ require-secure-transport FALSE
 rpl-read-size 8192
 rpl-stop-slave-timeout 31536000
 safe-user-create FALSE
+sched-affinity-foreground-thread (No default value)
+sched-affinity-log-checkpointer (No default value)
+sched-affinity-log-closer (No default value)
+sched-affinity-log-flush-notifier (No default value)
+sched-affinity-log-flusher (No default value)
+sched-affinity-log-write-notifier (No default value)
+sched-affinity-log-writer (No default value)
+sched-affinity-numa-aware FALSE
+sched-affinity-purge-coordinator (No default value)
 schema-definition-cache 256
 secondary-engine-cost-threshold 100000
 server-id 1

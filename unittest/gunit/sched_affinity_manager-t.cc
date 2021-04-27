@@ -14,17 +14,17 @@ for more details.
 #ifdef HAVE_LIBNUMA
 #include <numa.h>
 #endif
-#include <string>
-#include <iostream>
-#include <thread>
-#include <limits>
+#include <sys/syscall.h>
 #include <algorithm>
-#include <numeric>
 #include <atomic>
 #include <condition_variable>
-#include <mutex>
 #include <functional>
-#include <sys/syscall.h>
+#include <iostream>
+#include <limits>
+#include <mutex>
+#include <numeric>
+#include <string>
+#include <thread>
 
 #include "gtest/gtest.h"
 
@@ -39,13 +39,12 @@ using namespace std;
 
 namespace sched_affinity {
 
-extern const std::vector<Thread_type> thread_types;
-
 class SchedAffinityManagerTest : public ::testing::Test {
  protected:
-  static void start_threads(int thread_number, std::vector<std::thread> &threads,
-                     std::vector<pid_t> &thread_pids,
-                     std::atomic<bool> &is_stopped) {
+  static void start_threads(int thread_number,
+                            std::vector<std::thread> &threads,
+                            std::vector<pid_t> &thread_pids,
+                            std::atomic<bool> &is_stopped) {
     using namespace std::chrono_literals;
     std::mutex mutex;
     is_stopped.store(false);
@@ -74,26 +73,27 @@ class SchedAffinityManagerTest : public ::testing::Test {
     }
   }
 
-  static std::string convert_bitmask_to_string(Bitmask_shared_ptr& bitmask, int& min, int& max) {
+  static std::string convert_bitmask_to_string(Bitmask_ptr &bitmask, int &min,
+                                               int &max) {
     std::string res;
 
     int i = 0, total_cpu_num = numa_num_configured_cpus();
     bool flag1 = false, flag2 = false;
-    for (; i < total_cpu_num; ) {
+    for (; i < total_cpu_num;) {
       int start = i, curr = i;
 
-      while (curr < total_cpu_num 
-             && numa_bitmask_isbitset(bitmask.get(), curr)) {
+      while (curr < total_cpu_num &&
+             numa_bitmask_isbitset(bitmask.get(), curr)) {
         max = curr;
         curr++;
         flag2 = true;
       }
 
-      if(flag1 && flag2) {
+      if (flag1 && flag2) {
         res += ",";
       }
 
-      if(curr != start && !flag1) {
+      if (curr != start && !flag1) {
         flag1 = true;
         min = start;
       }
@@ -101,7 +101,7 @@ class SchedAffinityManagerTest : public ::testing::Test {
       if (curr != start && curr - start == 1) {
         res += std::to_string(start);
       } else if (curr != start) {
-        res += std::to_string(start) + "-" + std::to_string(curr-1);
+        res += std::to_string(start) + "-" + std::to_string(curr - 1);
       }
       if (curr == start) {
         i++;
@@ -123,57 +123,13 @@ class SchedAffinityManagerTest : public ::testing::Test {
     test_process_cpu_num = numa_num_configured_cpus();
     test_process_node_num = numa_num_configured_nodes();
 
-    thread_boilerplate = [](std::map<Thread_type, const char *> &config_before,
-                            std::map<Thread_type, const char *> &config_after,
-                            std::function<void()> op, bool numa_aware_param) {
-      std::mutex mutex;
-      std::condition_variable cv;
-
-      auto instance = Sched_affinity_manager::create_instance(config_before,
-                                                              numa_aware_param);
-      ASSERT_NE(instance, nullptr);
-
-      std::atomic<int> times(0);
-      std::vector<std::thread> threads;
-      for (int i = 0; i < SchedAffinityManagerTest::test_process_node_num + 1;
-           ++i) {
-        threads.push_back(std::thread([op, &times, &mutex, &cv]() {
-          std::unique_lock<std::mutex> thread_lock(mutex);
-          bool thread_ret =
-              Sched_affinity_manager::get_instance()->register_thread(
-                  Thread_type::FOREGROUND, sched_affinity::gettid());
-          EXPECT_EQ(thread_ret, true);
-          times.store(times + 1);
-          cv.wait(thread_lock);
-          op();
-          thread_ret =
-              Sched_affinity_manager::get_instance()->unregister_thread(
-                  sched_affinity::gettid());
-          EXPECT_EQ(thread_ret, true);
-        }));
-      }
-
-      while (times != test_process_node_num + 1) {
-        sleep(0);
-      }
-      bool ret = Sched_affinity_manager::get_instance()->rebalance_group(
-          config_after[Thread_type::FOREGROUND], Thread_type::FOREGROUND);
-      EXPECT_EQ(ret, true);
-      cv.notify_all();
-      std::for_each(threads.begin(), threads.end(),
-                    [](std::thread &thread) { thread.join(); });
-      threads.clear();
-      Sched_affinity_manager::free_instance();
-    };
-
     ASSERT_GT(test_process_cpu_num, 0);
     ASSERT_GT(test_process_node_num, 0);
 
     cpu_num_per_node = test_process_cpu_num / test_process_node_num;
 
     root_process_pid = sched_affinity::gettid();
-    Bitmask_shared_ptr default_bitmask =
-        get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr default_bitmask(numa_allocate_cpumask());
     int ret = numa_sched_getaffinity(0, default_bitmask.get());
     ASSERT_NE(ret, -1);
 
@@ -199,6 +155,39 @@ class SchedAffinityManagerTest : public ::testing::Test {
   }
 
  protected:
+  static void thread_boilerplate(
+      std::map<Thread_type, const char *> config_before,
+      std::map<Thread_type, const char *> config_after,
+      std::function<void()> op, bool numa_aware_param) {
+    std::mutex mutex;
+    std::condition_variable cv;
+
+    auto instance = Sched_affinity_manager::create_instance(config_before,
+                                                            numa_aware_param);
+    ASSERT_NE(instance, nullptr);
+
+    std::atomic<int> times(0);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < SchedAffinityManagerTest::test_process_node_num + 1;
+         ++i) {
+      threads.push_back(std::thread(thread_boilerplate_loop, std::ref(times),
+                                    std::ref(mutex), std::ref(cv),
+                                    std::ref(op)));
+    }
+
+    while (times != SchedAffinityManagerTest::test_process_node_num + 1) {
+      sleep(0);
+    }
+    bool ret = Sched_affinity_manager::get_instance()->rebalance_group(
+        config_after[Thread_type::FOREGROUND], Thread_type::FOREGROUND);
+    EXPECT_EQ(ret, true);
+    cv.notify_all();
+    std::for_each(threads.begin(), threads.end(),
+                  [](std::thread &thread) { thread.join(); });
+    threads.clear();
+    Sched_affinity_manager::free_instance();
+  };
+
   static int test_process_cpu_num;
   static int test_process_node_num;
   static int cpu_num_per_node;
@@ -207,10 +196,23 @@ class SchedAffinityManagerTest : public ::testing::Test {
   static std::string cpu_range_str;
   static std::map<Thread_type, const char *> default_config;
   static pid_t root_process_pid;
-  static std::function<void(std::map<Thread_type, const char *> &,
-                            std::map<Thread_type, const char *> &,
-                            std::function<void()>, bool)>
-      thread_boilerplate;
+
+ private:
+  static void thread_boilerplate_loop(std::atomic<int> &times,
+                                      std::mutex &mutex,
+                                      std::condition_variable &cv,
+                                      std::function<void()> &op) {
+    std::unique_lock<std::mutex> thread_lock(mutex);
+    bool thread_ret = Sched_affinity_manager::get_instance()->register_thread(
+        Thread_type::FOREGROUND, sched_affinity::gettid());
+    EXPECT_EQ(thread_ret, true);
+    times.store(times + 1);
+    cv.wait(thread_lock);
+    op();
+    thread_ret = Sched_affinity_manager::get_instance()->unregister_thread(
+        sched_affinity::gettid());
+    EXPECT_EQ(thread_ret, true);
+  }
 };
 
 int SchedAffinityManagerTest::test_process_cpu_num;
@@ -221,10 +223,6 @@ int SchedAffinityManagerTest::cpu_range_max;
 std::string SchedAffinityManagerTest::cpu_range_str;
 std::map<Thread_type, const char *> SchedAffinityManagerTest::default_config;
 pid_t SchedAffinityManagerTest::root_process_pid;
-std::function<void(std::map<Thread_type, const char *> &,
-                    std::map<Thread_type, const char *> &,
-                    std::function<void()>, bool)>
-    SchedAffinityManagerTest::thread_boilerplate;
 
 TEST_F(SchedAffinityManagerTest, AllNullptrConfig) {
   std::map<sched_affinity::Thread_type, const char *> all_nullptr_config = {
@@ -242,7 +240,8 @@ TEST_F(SchedAffinityManagerTest, AllNullptrConfig) {
   ASSERT_NE(instance, nullptr);
   ASSERT_EQ(typeid(*instance), typeid(Sched_affinity_manager_numa));
   for (auto thread_type : thread_types) {
-    ASSERT_FALSE(dynamic_cast<Sched_affinity_manager_numa*>(instance)->is_thread_sched_enabled(thread_type));
+    ASSERT_FALSE(dynamic_cast<Sched_affinity_manager_numa *>(instance)
+                     ->is_thread_sched_enabled(thread_type));
   }
 
   Sched_affinity_manager::free_instance();
@@ -281,14 +280,15 @@ TEST_F(SchedAffinityManagerTest, EmptyContainerConfig) {
   ASSERT_EQ(typeid(*instance), typeid(Sched_affinity_manager_numa));
   for (auto thread_type : thread_types) {
     ASSERT_FALSE(dynamic_cast<Sched_affinity_manager_numa *>(instance)
-                  ->is_thread_sched_enabled(thread_type));
+                     ->is_thread_sched_enabled(thread_type));
   }
 
   Sched_affinity_manager::free_instance();
 }
 
 TEST_F(SchedAffinityManagerTest, NormalizeCpuString) {
-  std::pair<std::string, bool> result = Sched_affinity_manager_numa::normalize_cpu_string("");
+  std::pair<std::string, bool> result =
+      Sched_affinity_manager_numa::normalize_cpu_string("");
   ASSERT_TRUE(result.second);
   ASSERT_EQ("", result.first);
 
@@ -321,7 +321,7 @@ TEST_F(SchedAffinityManagerTest, InitSchedAffinityInfo) {
       Sched_affinity_manager::create_instance(default_config, false);
   auto true_type_instance =
       dynamic_cast<Sched_affinity_manager_numa *>(instance);
-  Bitmask_shared_ptr bitmask = get_bitmask_shared_ptr(nullptr);
+  Bitmask_ptr bitmask(nullptr);
 
   bool result = true_type_instance->init_sched_affinity_info("", bitmask);
   ASSERT_TRUE(result);
@@ -331,7 +331,7 @@ TEST_F(SchedAffinityManagerTest, InitSchedAffinityInfo) {
   result = true_type_instance->init_sched_affinity_info("1-3", bitmask);
   ASSERT_TRUE(result);
   ASSERT_NE(bitmask.get(), nullptr);
-  Bitmask_shared_ptr expected = get_bitmask_shared_ptr(numa_parse_cpustring("1-3"));
+  Bitmask_ptr expected(numa_parse_cpustring("1-3"));
   ASSERT_EQ(1, numa_bitmask_equal(expected.get(), bitmask.get()));
   bitmask.reset();
 
@@ -349,21 +349,24 @@ TEST_F(SchedAffinityManagerTest, InitSchedAffinityGroup) {
   auto true_type_instance =
       dynamic_cast<Sched_affinity_manager_numa *>(instance);
 
-  Bitmask_shared_ptr bitmask = get_bitmask_shared_ptr(nullptr);
+  Bitmask_ptr bitmask(nullptr);
   std::vector<Sched_affinity_group> sched_affinity_groups;
 
   true_type_instance->init_sched_affinity_info("1-3", bitmask);
 
-  bool result = true_type_instance->init_sched_affinity_group(bitmask, false, sched_affinity_groups);
+  bool result = true_type_instance->init_sched_affinity_group(
+      bitmask, false, sched_affinity_groups);
   ASSERT_TRUE(result);
   ASSERT_EQ(1, sched_affinity_groups.size());
-  ASSERT_EQ(
-      1, numa_bitmask_equal(bitmask.get(), sched_affinity_groups[0].avail_cpu_mask.get()));
+  ASSERT_EQ(1,
+            numa_bitmask_equal(bitmask.get(),
+                               sched_affinity_groups[0].avail_cpu_mask.get()));
   ASSERT_EQ(0, sched_affinity_groups[0].assigned_thread_num);
   ASSERT_EQ(3, sched_affinity_groups[0].avail_cpu_num);
 
   sched_affinity_groups.clear();
-  result = true_type_instance->init_sched_affinity_group(bitmask, true, sched_affinity_groups);
+  result = true_type_instance->init_sched_affinity_group(bitmask, true,
+                                                         sched_affinity_groups);
   ASSERT_TRUE(result);
   ASSERT_EQ(4, sched_affinity_groups.size());
   ASSERT_TRUE(
@@ -424,11 +427,11 @@ TEST_F(SchedAffinityManagerTest, BindToGroup) {
 
   bool result = true_type_instance->bind_to_group(pid);
   ASSERT_TRUE(result);
-  std::map<Thread_type, std::vector<Sched_affinity_group>> &
-      m_sched_affinity_groups = true_type_instance->m_sched_affinity_groups;
-  auto sched_affinity_groups =
+  const auto &m_sched_affinity_groups =
+      true_type_instance->m_sched_affinity_groups;
+  const auto &sched_affinity_groups =
       m_sched_affinity_groups.at(Thread_type::FOREGROUND);
-  Bitmask_shared_ptr bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+  Bitmask_ptr bitmask(numa_allocate_cpumask());
   numa_sched_getaffinity(pid, bitmask.get());
   std::map<pid_t, int> &pid_group_id = true_type_instance->m_pid_group_id;
   ASSERT_NE(pid_group_id.end(), pid_group_id.find(pid));
@@ -438,7 +441,8 @@ TEST_F(SchedAffinityManagerTest, BindToGroup) {
   ASSERT_GE(sched_affinity_groups[group_id].avail_cpu_num, 1);
   ASSERT_EQ(1, sched_affinity_groups[group_id].assigned_thread_num);
   ASSERT_EQ(1, numa_bitmask_equal(
-                   sched_affinity_groups[group_id].avail_cpu_mask.get(), bitmask.get()));
+                   sched_affinity_groups[group_id].avail_cpu_mask.get(),
+                   bitmask.get()));
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),
@@ -469,9 +473,9 @@ TEST_F(SchedAffinityManagerTest, UnbindFromGroup) {
   m_thread_pid[Thread_type::FOREGROUND].insert(pid);
 
   true_type_instance->bind_to_group(pid);
-  std::map<Thread_type, std::vector<Sched_affinity_group>>
-      &m_sched_affinity_groups = true_type_instance->m_sched_affinity_groups;
-  auto &sched_affinity_groups =
+  const auto &m_sched_affinity_groups =
+      true_type_instance->m_sched_affinity_groups;
+  const auto &sched_affinity_groups =
       m_sched_affinity_groups.at(Thread_type::FOREGROUND);
   std::map<pid_t, int> &pid_group_id = true_type_instance->m_pid_group_id;
 
@@ -514,7 +518,8 @@ TEST_F(SchedAffinityManagerTest, GetThreadTypeByPid) {
 }
 
 TEST_F(SchedAffinityManagerTest, CheckCpuString) {
-  auto instance = Sched_affinity_manager::create_instance(default_config, false);
+  auto instance =
+      Sched_affinity_manager::create_instance(default_config, false);
   ASSERT_TRUE(instance->check_cpu_string(""));
   ASSERT_TRUE(instance->check_cpu_string(" "));
   ASSERT_TRUE(instance->check_cpu_string("  "));
@@ -535,8 +540,10 @@ TEST_F(SchedAffinityManagerTest, CheckCpuString) {
   ASSERT_FALSE(instance->check_cpu_string("?"));
   ASSERT_FALSE(instance->check_cpu_string("1-10000"));
   ASSERT_FALSE(instance->check_cpu_string("10000"));
-  std::cout<<"This test is expected to take more time."<<std::endl;
-  std::string extra_long_string = std::string("1,") + std::string(2 * 1024L * 1024L * 1024L, ' ') + std::string("2");
+  std::cout << "This test is expected to take more time." << std::endl;
+  std::string extra_long_string = std::string("1,") +
+                                  std::string(2 * 1024L * 1024L * 1024L, ' ') +
+                                  std::string("2");
   ASSERT_TRUE(instance->check_cpu_string(extra_long_string));
   std::string long_str;
   for (auto i = 0; i < test_process_cpu_num; ++i) {
@@ -583,7 +590,8 @@ TEST_F(SchedAffinityManagerTest, RegisterThread) {
 
   std::vector<pid_t> invalid_thread_pids;
   std::vector<std::thread> invalid_threads;
-  start_threads(thread_number, invalid_threads, invalid_thread_pids, is_stopped);
+  start_threads(thread_number, invalid_threads, invalid_thread_pids,
+                is_stopped);
 
   for (auto &thread_pid : invalid_thread_pids) {
     ASSERT_TRUE(instance->register_thread(Thread_type::LOG_WRITER, thread_pid));
@@ -667,11 +675,11 @@ TEST_F(SchedAffinityManagerTest, NumaAwareDisabled) {
   }
 
   ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(2,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(
-      thread_number,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
+      2, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
+  ASSERT_EQ(thread_number,
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                .assigned_thread_num);
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),
@@ -695,8 +703,8 @@ TEST_F(SchedAffinityManagerTest, NumaAwareEnabled) {
   auto true_type_instance =
       dynamic_cast<Sched_affinity_manager_numa *>(instance);
 
-  std::map<Thread_type, std::vector<Sched_affinity_group>>
-      &m_sched_affinity_groups = true_type_instance->m_sched_affinity_groups;
+  const auto &m_sched_affinity_groups =
+      true_type_instance->m_sched_affinity_groups;
 
   std::atomic<bool> is_stopped;
   std::vector<pid_t> thread_pids;
@@ -710,16 +718,16 @@ TEST_F(SchedAffinityManagerTest, NumaAwareEnabled) {
 
   ASSERT_EQ(test_process_node_num,
             m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(2,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
-  ASSERT_EQ(2,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
   ASSERT_EQ(
-      thread_number / 2,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
+      2, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(
-      thread_number / 2,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
+      2, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
+  ASSERT_EQ(thread_number / 2,
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                .assigned_thread_num);
+  ASSERT_EQ(thread_number / 2,
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1]
+                .assigned_thread_num);
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),
@@ -761,33 +769,79 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
                                std::to_string(cpu1_index + 2);
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
-  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(1,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
-  ASSERT_EQ(3,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
+  ASSERT_EQ(test_process_node_num,
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
   ASSERT_EQ(
-      2,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
+      1, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(
-      6,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
+      3, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
+  ASSERT_EQ(2, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                   .assigned_thread_num);
+  ASSERT_EQ(6, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1]
+                   .assigned_thread_num);
 
   new_cpu_string =
       std::to_string(cpu0_index) + "-" + std::to_string(cpu0_index + 3);
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
-  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(4,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
-  ASSERT_EQ(0,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
+  ASSERT_EQ(test_process_node_num,
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
   ASSERT_EQ(
-      8,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
+      4, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(
-      0,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
+      0, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
+  ASSERT_EQ(8, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                   .assigned_thread_num);
+  ASSERT_EQ(0, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1]
+                   .assigned_thread_num);
+
+  for (auto i = 0; i < 3; ++i) {
+    new_cpu_string = "";
+    instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
+
+    ASSERT_FALSE(
+        true_type_instance->is_thread_sched_enabled(Thread_type::FOREGROUND));
+  }
+
+  new_cpu_string =
+      std::to_string(cpu0_index) + "," + std::to_string(cpu0_index + 1) + "," +
+      std::to_string(cpu1_index) + "," + std::to_string(cpu1_index + 1);
+  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
+
+  ASSERT_EQ(test_process_node_num,
+            m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
+  ASSERT_EQ(
+      2, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
+  ASSERT_EQ(
+      2, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
+  ASSERT_EQ(4, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                   .assigned_thread_num);
+  ASSERT_EQ(4, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1]
+                   .assigned_thread_num);
+
+  // Numa_aware off
+  instance->update_numa_aware(false);
+
+  new_cpu_string = std::to_string(cpu0_index) + "," +
+                   std::to_string(cpu1_index) + "-" +
+                   std::to_string(cpu1_index + 2);
+  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
+
+  ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
+  ASSERT_EQ(
+      4, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
+  ASSERT_EQ(8, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                   .assigned_thread_num);
+
+  new_cpu_string =
+      std::to_string(cpu0_index) + "-" + std::to_string(cpu0_index + 3);
+  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
+
+  ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
+  ASSERT_EQ(
+      4, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
+  ASSERT_EQ(8, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                   .assigned_thread_num);
 
   new_cpu_string = "";
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
@@ -795,65 +849,16 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroup) {
   ASSERT_FALSE(
       true_type_instance->is_thread_sched_enabled(Thread_type::FOREGROUND));
 
-  new_cpu_string = 
-      std::to_string(cpu0_index) + "," + std::to_string(cpu0_index + 1) + "," +
-      std::to_string(cpu1_index) + "," + std::to_string(cpu1_index + 1);
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
-
-  ASSERT_EQ(test_process_node_num, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(2,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
-  ASSERT_EQ(2,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].avail_cpu_num);
-  ASSERT_EQ(
-      4,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
-  ASSERT_EQ(
-      4,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[1].assigned_thread_num);
-
-  // Numa_aware off
-  instance->update_numa_aware(false);
-
-  new_cpu_string = std::to_string(cpu0_index) + "," +
-                               std::to_string(cpu1_index) + "-" +
-                               std::to_string(cpu1_index + 2);
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
-
-  ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(4, 
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
-  ASSERT_EQ(
-      8,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
-
   new_cpu_string =
-      std::to_string(cpu0_index) + "-" + std::to_string(cpu0_index + 3);
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
-
-  ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(4,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
-  ASSERT_EQ(
-      8,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
-
-  new_cpu_string = "";
-  instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
-
-  ASSERT_FALSE(true_type_instance->is_thread_sched_enabled(Thread_type::FOREGROUND));
-
-  new_cpu_string = 
       std::to_string(cpu0_index) + "," + std::to_string(cpu0_index + 1) + "," +
       std::to_string(cpu1_index) + "," + std::to_string(cpu1_index + 1);
   instance->rebalance_group(new_cpu_string.c_str(), Thread_type::FOREGROUND);
 
   ASSERT_EQ(1, m_sched_affinity_groups.at(Thread_type::FOREGROUND).size());
-  ASSERT_EQ(4,
-            m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
   ASSERT_EQ(
-      8,
-      m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].assigned_thread_num);
+      4, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0].avail_cpu_num);
+  ASSERT_EQ(8, m_sched_affinity_groups.at(Thread_type::FOREGROUND)[0]
+                   .assigned_thread_num);
 
   is_stopped.store(true);
   std::for_each(threads.begin(), threads.end(),
@@ -924,7 +929,8 @@ TEST_F(SchedAffinityManagerTest, UpdateNumaAware) {
     instance->register_thread(Thread_type::FOREGROUND, thread_pid);
   }
 
-  auto &sched_affinity_group = m_sched_affinity_groups.at(Thread_type::FOREGROUND);
+  auto &sched_affinity_group =
+      m_sched_affinity_groups.at(Thread_type::FOREGROUND);
 
   ASSERT_TRUE(instance->update_numa_aware(true));
   ASSERT_TRUE(instance->update_numa_aware(false));
@@ -933,17 +939,17 @@ TEST_F(SchedAffinityManagerTest, UpdateNumaAware) {
   ASSERT_EQ(thread_number, sched_affinity_group[0].assigned_thread_num);
   ASSERT_TRUE(std::any_of(
       m_pid_group_id.begin(), m_pid_group_id.end(),
-      [](const auto & pid_group_id) { return pid_group_id.second == 0; }));
+      [](const auto &pid_group_id) { return pid_group_id.second == 0; }));
   ASSERT_TRUE(instance->update_numa_aware(false));
 
   ASSERT_TRUE(instance->update_numa_aware(true));
   ASSERT_EQ(test_process_node_num, sched_affinity_group.size());
   ASSERT_EQ(thread_number, m_pid_group_id.size());
-  ASSERT_TRUE(std::any_of(
-      m_pid_group_id.begin(), m_pid_group_id.end(),
-      [](const auto & pid_group_id) {
-        return pid_group_id.second == 0 || pid_group_id.second == 1;
-      }));
+  ASSERT_TRUE(std::any_of(m_pid_group_id.begin(), m_pid_group_id.end(),
+                          [](const auto &pid_group_id) {
+                            return pid_group_id.second == 0 ||
+                                   pid_group_id.second == 1;
+                          }));
   for (auto i = 0; i < 2; ++i) {
     ASSERT_EQ(2, sched_affinity_group[i].avail_cpu_num);
     ASSERT_EQ(4, sched_affinity_group[i].assigned_thread_num);
@@ -969,11 +975,13 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupThreadAffinity) {
    * background thread parameter is always off.
    */
   thread_op = [this]() {
-    auto process_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
-    ASSERT_GE(numa_sched_getaffinity(root_process_pid, process_bitmask.get()), 0);
-    ASSERT_GE(numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get()),
+    Bitmask_ptr process_bitmask(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
+    ASSERT_GE(numa_sched_getaffinity(root_process_pid, process_bitmask.get()),
               0);
+    ASSERT_GE(
+        numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get()),
+        0);
     for (int j = 0; j < test_process_cpu_num; ++j) {
       bool p_ret = numa_bitmask_isbitset(process_bitmask.get(), j);
       bool t_ret = numa_bitmask_isbitset(thread_bitmask.get(), j);
@@ -983,7 +991,8 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupThreadAffinity) {
 
   bool numa_aware_param = true;
   auto config_before = default_config;
-  config_before[Thread_type::FOREGROUND] = const_cast<char *>(cpu_range_str.c_str());
+  config_before[Thread_type::FOREGROUND] =
+      const_cast<char *>(cpu_range_str.c_str());
   auto config_after = default_config;
   config_after[Thread_type::FOREGROUND] = nullptr;
   thread_boilerplate(config_before, config_after, thread_op, numa_aware_param);
@@ -994,7 +1003,7 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupThreadAffinity) {
    * background thread parameter is always off.
    */
   thread_op = [this]() {
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
     int bitmask_ret =
         numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get());
     ASSERT_GE(bitmask_ret, 0);
@@ -1011,17 +1020,18 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupThreadAffinity) {
   config_before = default_config;
   config_before[Thread_type::FOREGROUND] = nullptr;
   config_after = default_config;
+  std::string cpu_range_min_str = std::to_string(cpu_range_min);
   config_after[Thread_type::FOREGROUND] =
-      const_cast<char *>(std::to_string(cpu_range_min).c_str());
+      const_cast<char *>(cpu_range_min_str.c_str());
   thread_boilerplate(config_before, config_after, thread_op, numa_aware_param);
 
   /*
-   * This part is to test whether the reschedule-function will function as 
-   * expected when the foreground thread parameter changed, and the 
+   * This part is to test whether the reschedule-function will function as
+   * expected when the foreground thread parameter changed, and the
    * background thread parameter is always off.
    */
   thread_op = [this]() {
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
     int bitmask_ret =
         numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get());
     ASSERT_GE(bitmask_ret, 0);
@@ -1041,14 +1051,15 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupThreadAffinity) {
   config_before[Thread_type::FOREGROUND] =
       const_cast<char *>(cpu_range_str.c_str());
   config_after = default_config;
+  cpu_range_min_str = std::to_string(cpu_range_min);
   config_after[Thread_type::FOREGROUND] =
-      const_cast<char *>(std::to_string(cpu_range_min).c_str());
+      const_cast<char *>(cpu_range_min_str.c_str());
   thread_boilerplate(config_before, config_after, thread_op, numa_aware_param);
 }
 
 TEST_F(SchedAffinityManagerTest, RebalanceGroupOptional) {
   if (test_process_node_num < 4) {
-    FAIL()<<"test_process_node_num < 4";
+    FAIL() << "test_process_node_num < 4";
     return;
   }
 
@@ -1061,16 +1072,18 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupOptional) {
   int cpu4_index = 4 * cpu_num_per_node;
 
   /*
-   * This test case collection is to offer more test cases for the rebalance_group 
-   * function when the cpu range changed.
-   * The scenarios contains:
+   * This test case collection is to offer more test cases for the
+   * rebalance_group function when the cpu range changed. The scenarios
+   * contains:
    * 1. one node used before the rebalance, and three nodes after.
-   * 2. two nodes whithin same socket used before the rebalance, and two other after.
-   * 3. two nodes at different sockets used before the rebalance, and two other after.
+   * 2. two nodes whithin same socket used before the rebalance, and two other
+   * after.
+   * 3. two nodes at different sockets used before the rebalance, and two other
+   * after.
    * 4. three nodes used before the rebalance, and one node after.
    */
   thread_op = [this]() {
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
     int bitmask_ret =
         numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get());
     ASSERT_GE(bitmask_ret, 0);
@@ -1096,9 +1109,8 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupOptional) {
   config_after[Thread_type::FOREGROUND] = new_cpu_string.c_str();
   thread_boilerplate(config_before, config_after, thread_op, numa_aware_param);
 
-
   thread_op = [this]() {
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
     int bitmask_ret =
         numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get());
     ASSERT_GE(bitmask_ret, 0);
@@ -1123,7 +1135,7 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupOptional) {
   thread_boilerplate(config_before, config_after, thread_op, numa_aware_param);
 
   thread_op = [this]() {
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
     int bitmask_ret =
         numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get());
     ASSERT_GE(bitmask_ret, 0);
@@ -1152,7 +1164,7 @@ TEST_F(SchedAffinityManagerTest, RebalanceGroupOptional) {
   thread_boilerplate(config_before, config_after, thread_op, numa_aware_param);
 
   thread_op = [this]() {
-    auto thread_bitmask = get_bitmask_shared_ptr(numa_allocate_cpumask());
+    Bitmask_ptr thread_bitmask(numa_allocate_cpumask());
     int bitmask_ret =
         numa_sched_getaffinity(sched_affinity::gettid(), thread_bitmask.get());
     ASSERT_GE(bitmask_ret, 0);
@@ -1186,7 +1198,8 @@ TEST_F(SchedAffinityManagerTest, GetTotalNodeNumber) {
   ASSERT_NE(instance, nullptr);
 
   int criterion = numa_num_configured_nodes();
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->get_total_node_number(), criterion);
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->get_total_node_number(),
+            criterion);
 
   Sched_affinity_manager::free_instance();
 }
@@ -1196,11 +1209,32 @@ TEST_F(SchedAffinityManagerTest, GetCpuNumberPerNode) {
   ASSERT_NE(instance, nullptr);
 
   auto criterion = numa_num_configured_cpus() / numa_num_configured_nodes();
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->get_cpu_number_per_node(), criterion);
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->get_cpu_number_per_node(),
+            criterion);
 
   Sched_affinity_manager::free_instance();
 }
 
-} // namespace sched_affinity
+TEST_F(SchedAffinityManagerTest, Fallback) {
+  auto instance = Sched_affinity_manager::create_instance(default_config, true);
+  auto true_type_instance =
+      dynamic_cast<Sched_affinity_manager_numa *>(instance);
+  ASSERT_FALSE(true_type_instance->m_is_fallback);
+  ASSERT_FALSE(true_type_instance->m_fallback_delegate);
+  true_type_instance->fallback();
+  ASSERT_TRUE(true_type_instance->m_is_fallback);
+  ASSERT_TRUE(true_type_instance->m_fallback_delegate);
+  ASSERT_TRUE(instance->register_thread(Thread_type::FOREGROUND, 0));
+  ASSERT_TRUE(instance->register_thread(Thread_type::LOG_WRITER, 0));
+  ASSERT_TRUE(instance->unregister_thread(0));
+  ASSERT_TRUE(instance->rebalance_group("", Thread_type::FOREGROUND));
+  ASSERT_TRUE(instance->rebalance_group("", Thread_type::LOG_WRITER));
+  ASSERT_TRUE(instance->update_numa_aware(true));
+  ASSERT_TRUE(instance->update_numa_aware(false));
+  ASSERT_TRUE(instance->take_group_snapshot().empty());
+
+  Sched_affinity_manager::free_instance();
+}
+}  // namespace sched_affinity
 
 #endif /* HAVE_LIBNUMA */

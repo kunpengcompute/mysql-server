@@ -17,11 +17,11 @@ for more details.
 #endif
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
-#include <memory>
 
 #include <unistd.h>
 
@@ -32,7 +32,6 @@ for more details.
 #include "mysql/psi/mysql_mutex.h"
 
 namespace sched_affinity {
-
 enum class Thread_type {
   FOREGROUND,
   LOG_WRITER,
@@ -45,13 +44,14 @@ enum class Thread_type {
   UNDEFINED
 };
 
+extern const std::vector<Thread_type> thread_types;
 extern const std::map<Thread_type, std::string> thread_type_names;
 
 pid_t gettid();
 
 class Sched_affinity_manager {
  public:
-  virtual ~Sched_affinity_manager() {};
+  virtual ~Sched_affinity_manager(){};
   static Sched_affinity_manager *create_instance(
       const std::map<Thread_type, const char *> &, bool numa_aware);
   static Sched_affinity_manager *get_instance();
@@ -59,7 +59,8 @@ class Sched_affinity_manager {
   virtual bool register_thread(const Thread_type thread_type,
                                const pid_t pid) = 0;
   virtual bool unregister_thread(const pid_t pid) = 0;
-  virtual bool rebalance_group(const char *cpu_string, const Thread_type thread_type) = 0;
+  virtual bool rebalance_group(const char *cpu_string,
+                               const Thread_type thread_type) = 0;
   virtual bool update_numa_aware(bool numa_aware) = 0;
   virtual std::string take_group_snapshot() = 0;
   virtual int get_total_node_number() = 0;
@@ -80,10 +81,10 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   Sched_affinity_manager_dummy &operator=(Sched_affinity_manager_dummy &&) =
       delete;
   bool register_thread(const Thread_type, const pid_t) override { return true; }
-  bool unregister_thread(const pid_t) override {
+  bool unregister_thread(const pid_t) override { return true; }
+  bool rebalance_group(const char *, const Thread_type) override {
     return true;
   }
-  bool rebalance_group(const char *, const Thread_type) override { return true; }
   bool update_numa_aware(bool) override { return true; }
   std::string take_group_snapshot() override { return std::string(); }
   int get_total_node_number() override { return -1; }
@@ -92,7 +93,7 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
 
  private:
   Sched_affinity_manager_dummy() : Sched_affinity_manager(){};
-  ~Sched_affinity_manager_dummy() override {};
+  ~Sched_affinity_manager_dummy() override{};
   bool init(const std::map<Thread_type, const char *> &, bool) override {
     return true;
   }
@@ -114,15 +115,13 @@ struct Bitmask_deleter {
   }
 };
 
-using Bitmask_shared_ptr = std::shared_ptr<bitmask>;
+using Bitmask_ptr = std::unique_ptr<bitmask, Bitmask_deleter>;
 
 struct Sched_affinity_group {
-  Bitmask_shared_ptr avail_cpu_mask;
+  Bitmask_ptr avail_cpu_mask;
   int avail_cpu_num;
   int assigned_thread_num;
 };
-
-Bitmask_shared_ptr get_bitmask_shared_ptr(bitmask* ptr);
 
 class Sched_affinity_manager_numa : public Sched_affinity_manager {
  public:
@@ -135,7 +134,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
 
   bool register_thread(const Thread_type thread_type, const pid_t pid) override;
   bool unregister_thread(const pid_t pid) override;
-  bool rebalance_group(const char *cpu_string, const Thread_type thread_type) override;
+  bool rebalance_group(const char *cpu_string,
+                       const Thread_type thread_type) override;
   bool update_numa_aware(bool numa_aware) override;
   std::string take_group_snapshot() override;
   int get_total_node_number() override;
@@ -147,10 +147,10 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   ~Sched_affinity_manager_numa() override;
   bool init(const std::map<Thread_type, const char *> &, bool) override;
   bool init_sched_affinity_info(const std::string &cpu_string,
-                                       Bitmask_shared_ptr &group_bitmask);
-  bool init_sched_affinity_group(const Bitmask_shared_ptr &group_bitmask,
-                                        const bool numa_aware,
-                                        std::vector<Sched_affinity_group> &sched_affinity_group);
+                                Bitmask_ptr &group_bitmask);
+  bool init_sched_affinity_group(
+      const Bitmask_ptr &group_bitmask, const bool numa_aware,
+      std::vector<Sched_affinity_group> &sched_affinity_group);
   bool is_thread_sched_enabled(const Thread_type thread_type);
   bool bind_to_group(const pid_t pid);
   bool unbind_from_group(const pid_t pid);
@@ -168,9 +168,11 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   static std::pair<std::string, bool> normalize_cpu_string(
       const std::string &cpu_string);
   /**
-  The sched_affinity_manager_numa instance's internal state may become inconsistent due to some previous failure, e.g. libnuma return error.
-  Call fallback() to use a fallback_delegate to serve further request to sched_affinity_manager_numa instance's public interface.
-  This method should be called under the protection of m_mutex.
+  The sched_affinity_manager_numa instance's internal state may become
+  inconsistent due to some previous failure, e.g. libnuma return error. Call
+  fallback() to use a fallback_delegate to serve further request to
+  sched_affinity_manager_numa instance's public interface. This method should be
+  called under the protection of m_mutex.
   */
   void fallback();
 
@@ -184,7 +186,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   std::unique_ptr<Sched_affinity_manager> m_fallback_delegate;
   std::map<Thread_type, std::vector<Sched_affinity_group>>
       m_sched_affinity_groups;
-  std::map<Thread_type, Bitmask_shared_ptr> m_thread_bitmask;
+  std::map<Thread_type, Bitmask_ptr> m_thread_bitmask;
   std::map<Thread_type, std::set<pid_t>> m_thread_pid;
   std::map<pid_t, int> m_pid_group_id;
   mysql_mutex_t m_mutex;
@@ -208,8 +210,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   FRIEND_TEST(SchedAffinityManagerTest, AllNullptrConfig);
   FRIEND_TEST(SchedAffinityManagerTest, EmptyStringConfig);
   FRIEND_TEST(SchedAffinityManagerTest, EmptyContainerConfig);
+  FRIEND_TEST(SchedAffinityManagerTest, Fallback);
 #endif
-
 };
 #endif /* HAVE_LIBNUMA */
 }  // namespace sched_affinity

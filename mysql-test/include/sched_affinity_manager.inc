@@ -95,6 +95,103 @@ while ($i<$connection_number)
   --inc $i
 }
 
-SET GLOBAL sched_affinity_foreground_thread='0-1';
+--echo # Change sched_affinity related system variables
+
+--let $group1=0,1,2
+--eval SET GLOBAL sched_affinity_foreground_thread='$group1';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_foreground_thread="";
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--let $group1=0,1,2
+--let $range=1
+--let $group2_from=$sched_affinity_group_capacity
+--expr $group2_to=$sched_affinity_group_capacity + $range
+--eval SET GLOBAL sched_affinity_foreground_thread='$group1,$group2_from-$group2_to';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
 --error ER_INVALID_CPU_STRING
-SET GLOBAL sched_affinity_foreground_thread='???';
+--eval SET GLOBAL sched_affinity_foreground_thread='???';
+
+--let $i=0
+--let $connection_number = 100
+while ($i<$connection_number)
+{
+  --connect(conn$i,localhost,root,,)
+  --connection default
+  --inc $i
+}
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--let $range=1
+--let $group2_from=$sched_affinity_group_capacity
+--expr $group2_to=$sched_affinity_group_capacity + $range
+--eval SET GLOBAL sched_affinity_foreground_thread='$group2_from-$group2_to';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--error ER_INVALID_CPU_STRING
+--eval SET GLOBAL sched_affinity_foreground_thread='???';
+
+--error ER_INVALID_CPU_STRING
+--eval SET GLOBAL sched_affinity_foreground_thread='1-100000';
+
+--eval SET GLOBAL sched_affinity_foreground_thread='';
+--eval SET GLOBAL sched_affinity_foreground_thread='';
+
+--let $group1=0,1,2
+--let $range=1
+--let $group2_from=$sched_affinity_group_capacity
+--expr $group2_to=$sched_affinity_group_capacity + $range
+--eval SET GLOBAL sched_affinity_foreground_thread='$group1,$group2_from-$group2_to';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--let $group1=0
+--let $range=6
+--let $group2_from=$sched_affinity_group_capacity
+--expr $group2_to=$sched_affinity_group_capacity + $range
+--eval SET GLOBAL sched_affinity_foreground_thread='$group1,$group2_from-$group2_to';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--let $range=1
+--let $group2_from=$sched_affinity_group_capacity
+--expr $group2_to=$sched_affinity_group_capacity + $range
+--eval SET GLOBAL sched_affinity_foreground_thread='$group2_from-$group2_to';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_foreground_thread="";
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_numa_aware=0;
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_numa_aware=1;
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_numa_aware=0;
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--let $group1=0,1,2
+--let $range=1
+--let $group2_from=$sched_affinity_group_capacity
+--expr $group2_to=$sched_affinity_group_capacity + $range
+--eval SET GLOBAL sched_affinity_foreground_thread='$group1,$group2_from-$group2_to';
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_numa_aware=0;
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_numa_aware=1;
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--eval SET GLOBAL sched_affinity_numa_aware=0;
+SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
+
+--echo # Clean up
+--let $i=0
+while ($i<$connection_number)
+{
+  --disconnect conn$i
+  --connection default
+  --inc $i
+}
