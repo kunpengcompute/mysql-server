@@ -164,6 +164,7 @@
 #include "sql/thd_raii.h"
 #include "sql/transaction.h"  // trans_rollback_implicit
 #include "sql/transaction_info.h"
+#include "sql/pq_condition.h"
 #include "sql_string.h"
 #include "thr_lock.h"
 #include "violite.h"
@@ -2648,10 +2649,7 @@ int mysql_execute_command(THD *thd, bool first_level) {
 
   thd->work_part_info = nullptr;
 
-  if (!thd->no_pq && thd->variables.force_parallel_execute && !thd->pq_dop) {
-    thd->pq_dop = thd->variables.parallel_default_dop;
-    thd->m_suite_for_pq = true;
-  }
+  set_pq_condition_status(thd);
 
   /*
     Each statement or replication event which might produce deadlock

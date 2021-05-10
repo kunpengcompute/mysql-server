@@ -79,6 +79,7 @@ bool QEP_TAB::pq_copy(THD *thd, QEP_TAB *orig) {
   keys().merge(orig->keys());
   m_reversed_access = orig->m_reversed_access;
   do_parallel_scan = orig->do_parallel_scan;
+  firstmatch_return = orig->firstmatch_return;
   cache_idx_cond = orig->cache_idx_cond;
 
   POSITION *position = new (thd->pq_mem_root) POSITION;

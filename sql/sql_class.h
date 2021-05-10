@@ -105,6 +105,7 @@
 #include "sql/system_variables.h"       // system_variables
 #include "sql/transaction_info.h"       // Ha_trx_info
 #include "sql/xa.h"
+#include "sql/pq_condition.h"
 #include "sql_string.h"
 #include "template_utils.h"
 #include "thr_lock.h"
@@ -908,7 +909,7 @@ class THD : public MDL_context_owner,
   /* select .. fro share/update */
   bool locking_clause;
   /* indicates whether parallel query is supported */
-  bool m_suite_for_pq{true};
+  enum PqConditionStatus m_suite_for_pq{PqConditionStatus::INIT};
 
   /* indicates whether occurring error during execution */
   bool pq_error{false};
@@ -1782,6 +1783,7 @@ public:
     Attachable_trx_rw &operator=(const Attachable_trx_rw &);
   };
 
+ public:
   Attachable_trx *m_attachable_trx;
 
  public:
@@ -2576,7 +2578,6 @@ public:
 
   void release_resources();
   bool release_resources_done() const { return m_release_resources_done; }
-  bool suite_for_parallel_query();
 
  private:
   bool m_release_resources_done;

@@ -1902,10 +1902,6 @@ class SELECT_LEX {
 
   bool walk(Item_processor processor, enum_walk walk, uchar *arg);
 
-  bool pq_check_table_list();
-
-  bool suite_for_parallel_query(THD *thd);
-
   /// Helper for fix_prepare_information()
   void fix_prepare_information_for_order(THD *thd, SQL_I_List<ORDER> *list,
                                          Group_list_ptrs **list_ptrs);

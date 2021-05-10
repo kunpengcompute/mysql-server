@@ -45,6 +45,7 @@
 #include "sql/exchange_sort.h"
 #include "sql/basic_row_iterators.h"
 #include "sql/pq_global.h"
+#include "sql/pq_condition.h"
 
 
 ulonglong parallel_memory_limit = 0;
@@ -74,53 +75,6 @@ void release_pq_running_threads(uint dop) {
   mysql_cond_broadcast(&COND_pq_threads_running);
 
   mysql_mutex_unlock(&LOCK_pq_threads_running);
-}
-
-static bool check_pq_running_threads(uint dop, ulong timeout_ms) {
-  bool success = false;
-  mysql_mutex_lock(&LOCK_pq_threads_running);
-  if (parallel_threads_running + dop > parallel_max_threads) {
-    if (timeout_ms > 0) {
-      struct timespec start_ts;
-      struct timespec end_ts;
-      struct timespec abstime;
-      ulong wait_timeout = timeout_ms;
-      int wait_result;
-
-      start:
-      set_timespec(&start_ts, 0);
-      /* Calcuate the waiting period. */
-      abstime.tv_sec = start_ts.tv_sec + wait_timeout / TIME_THOUSAND;
-      abstime.tv_nsec =
-          start_ts.tv_nsec + (wait_timeout % TIME_THOUSAND) * TIME_MILLION;
-      if (abstime.tv_nsec >= TIME_BILLION) {
-        abstime.tv_sec++;
-        abstime.tv_nsec -= TIME_BILLION;
-      }
-      wait_result = mysql_cond_timedwait(&COND_pq_threads_running,
-                                         &LOCK_pq_threads_running, &abstime);
-      if (parallel_threads_running + dop <= parallel_max_threads) {
-        success = true;
-      } else {
-        success = false;
-        if (!wait_result) {  // wait isn't timeout
-          set_timespec(&end_ts, 0);
-          ulong difftime = (end_ts.tv_sec - start_ts.tv_sec) * TIME_THOUSAND +
-                           (end_ts.tv_nsec - start_ts.tv_nsec) / TIME_MILLION;
-          wait_timeout -= difftime;
-          goto start;
-        }
-      }
-    }
-  } else
-    success = true;
-
-  if (success) {
-    parallel_threads_running += dop;
-    current_thd->pq_threads_running += dop;
-  }
-  mysql_mutex_unlock(&LOCK_pq_threads_running);
-  return success;
 }
 
 /**
@@ -569,30 +523,20 @@ static void restore_leader_plan(JOIN *join) {
  *    PARL_EXEC: successfully run  in parallel mode
  *    ABORT_EXEC: run error in parallal mode and then drop it
  */
-PQ_exec_status make_pq_leader_plan(JOIN *join, uint dop) {
-  // max PQ memory size limit
-  if (get_pq_memory_total() >= parallel_memory_limit) {
-    atomic_add<uint>(parallel_memory_refused, 1);
+PQ_exec_status make_pq_leader_plan(THD *thd) {
+  if (!check_pq_condition(thd)) {
+    thd->m_suite_for_pq = PqConditionStatus::NOT_SUPPORTED;
     return PQ_exec_status::SEQ_EXEC;
+  } else {
+    thd->m_suite_for_pq = PqConditionStatus::SUPPORTED;
   }
 
-  // max PQ threads limit
-  if (!check_pq_running_threads(dop,
-         join->thd->variables.parallel_queue_timeout)) {
-    atomic_add<uint>(parallel_threads_refused, 1);
-    return PQ_exec_status::SEQ_EXEC;
-  }
-
-  // RBO limit
-  if (!join->choose_parallel_tables() ||
-      !join->check_pq_select_fields())
-    return PQ_exec_status::SEQ_EXEC;
-
+  uint dop = thd->pq_dop;
+  JOIN *join = thd->lex->unit->first_select()->join;
   List<Item> *fields_old = join->fields;
   QEP_TAB *tab = nullptr;
   Gather_operator *gather = nullptr;
   char buff[64] = {0};
-  THD *thd = join->thd;
   ulong saved_thd_want_privilege = thd->want_privilege;
   thd->want_privilege = 0;
 
