@@ -406,6 +406,16 @@ struct System_variables {
     @sa Sys_var_require_row_format
   */
   bool require_row_format;
+
+  bool force_parallel_execute;
+
+  ulong parallel_cost_threshold;
+
+  ulong parallel_default_dop;
+
+  ulong parallel_queue_timeout;
+
+  bool pq_copy_from(System_variables leader);
 };
 
 /**
@@ -488,6 +498,8 @@ struct System_status_var {
   */
   double last_query_cost;
   ulonglong last_query_partial_plans;
+  bool reset {false};
+  bool pq_merge_status(System_status_var worker);
 };
 
 /*

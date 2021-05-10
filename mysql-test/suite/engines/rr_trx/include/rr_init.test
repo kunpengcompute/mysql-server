@@ -85,7 +85,7 @@ SHOW CREATE TABLE t1;
 
 --delimiter //
 
-eval CREATE PROCEDURE insertRows(rows INT)
+eval CREATE PROCEDURE insertRows(m INT)
 BEGIN
   SET @n = 1;
   REPEAT
@@ -98,7 +98,7 @@ BEGIN
                0, CONNECTION_ID(), 0, 
                0, 1);
     SET @n = @n + 1;
-  UNTIL @n > rows
+  UNTIL @n > m
   END REPEAT;
 END;
 //

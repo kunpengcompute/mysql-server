@@ -1698,6 +1698,7 @@ bool PT_create_table_default_collation::contextualize(
 bool PT_locking_clause::contextualize(Parse_context *pc) {
   LEX *lex = pc->thd->lex;
 
+  pc->thd->locking_clause = true;
   if (lex->is_explain()) return false;
 
   if (m_locked_row_action == Locked_row_action::SKIP)

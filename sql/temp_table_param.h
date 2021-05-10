@@ -224,6 +224,8 @@ class Temp_table_param {
     grouped_expressions.clear();
     copy_fields.clear();
   }
+
+  void pq_copy(Temp_table_param *orig);
 };
 
 #endif  // TEMP_TABLE_PARAM_INCLUDED

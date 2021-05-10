@@ -115,10 +115,26 @@ DROP TABLE t1, t2;
 
 # filesort.cc
 create table t1(a int) ;
+
 insert into t1 values(1),(2),(3);
 
 # Do not mtr.add_suppression here, avoid "Deadlock found ..." messages in log.
-set debug='d,bug19656296';
+
+--let $force_parallel_execute=`show variables like 'force_parallel_execute'`
+--let $pq_enable = `SELECT SUBSTRING_INDEX('$force_parallel_execute', '	', -1)`
+
+# no-parallel
+if($pq_enable != ON)
+{
+  set debug='d,bug19656296';
+}
+
+if($pq_enable == ON)
+{
+  set session debug="";
+  set session debug='+d,ha_pq_next_deadlock';
+}
+
 --error ER_LOCK_DEADLOCK
 select * from t1 order by a;
 drop table t1;

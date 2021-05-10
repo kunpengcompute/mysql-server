@@ -1356,19 +1356,19 @@ companynr	companyname
 58	company 8
 65	company 9
 68	company 10
-select SQL_SMALL_RESULT t2.companynr,companyname from t4,t2 where t2.companynr=t4.companynr group by t2.companynr;
+select SQL_SMALL_RESULT t2.companynr,companyname from t4,t2 where t2.companynr=t4.companynr group by t2.companynr order by t2.companynr;
 companynr	companyname
 00	Unknown
-37	company 4
-36	company 3
-50	company 11
-58	company 8
 29	company 1
-40	company 5
-53	company 7
-65	company 9
-41	company 6
 34	company 2
+36	company 3
+37	company 4
+40	company 5
+41	company 6
+50	company 11
+53	company 7
+58	company 8
+65	company 9
 68	company 10
 select * from t1,t1 t12;
 Period	Varor_period	Period	Varor_period
@@ -1832,7 +1832,7 @@ companynr	count(*)
 50	11
 65	10
 53	4
-select t2.fld4,t2.fld1,count(price),sum(price),min(price),max(price),avg(price) from t3,t2 where t3.companynr = 37 and t2.fld1 = t3.t2nr group by fld1,t2.fld4;
+select t2.fld4,t2.fld1,count(price),sum(price),min(price),max(price),avg(price) from t3,t2 where t3.companynr = 37 and t2.fld1 = t3.t2nr group by fld1,t2.fld4 order by fld1;
 fld4	fld1	count(price)	sum(price)	min(price)	max(price)	avg(price)
 teethe	000001	1	5987435	5987435	5987435	5987435.0000
 dreaded	011401	1	5987435	5987435	5987435	5987435.0000
@@ -1883,6 +1883,7 @@ interdependent	018051	1	5987435	5987435	5987435	5987435.0000
 Graves	018052	1	28357832	28357832	28357832	28357832.0000
 neonatal	018053	1	39654943	39654943	39654943	39654943.0000
 sorters	018061	1	5987435	5987435	5987435	5987435.0000
+epistle	018062	1	28357832	28357832	28357832	28357832.0000
 Conley	018101	1	5987435	5987435	5987435	5987435.0000
 lectured	018102	1	28357832	28357832	28357832	28357832.0000
 Abraham	018103	1	39654943	39654943	39654943	39654943.0000
@@ -1920,8 +1921,7 @@ partridges	038103	1	39654943	39654943	39654943	39654943.0000
 recruited	038201	1	5987435	5987435	5987435	5987435.0000
 dimensions	038202	1	28357832	28357832	28357832	28357832.0000
 Chicana	038203	1	39654943	39654943	39654943	39654943.0000
-epistle	018062	1	28357832	28357832	28357832	28357832.0000
-select t3.companynr,fld3,sum(price) from t3,t2 where t2.fld1 = t3.t2nr and t3.companynr = 512 group by companynr,fld3;
+select t3.companynr,fld3,sum(price) from t3,t2 where t2.fld1 = t3.t2nr and t3.companynr = 512 group by companynr,fld3 order by companynr;
 companynr	fld3	sum(price)
 512	boat	786542
 512	capably	786542
@@ -1933,11 +1933,11 @@ companynr	fld3	sum(price)
 512	Micronesia	786542
 512	descendants	786542
 512	skies	786542
-select t2.companynr,count(*),min(fld3),max(fld3),sum(price),avg(price) from t2,t3 where t3.companynr >= 30 and t3.companynr <= 58 and t3.t2nr = t2.fld1 and 1+1=2 group by t2.companynr;
+select t2.companynr,count(*),min(fld3),max(fld3),sum(price),avg(price) from t2,t3 where t3.companynr >= 30 and t3.companynr <= 58 and t3.t2nr = t2.fld1 and 1+1=2 group by t2.companynr order by t2.companynr;
 companynr	count(*)	min(fld3)	max(fld3)	sum(price)	avg(price)
 00	1	Omaha	Omaha	5987435	5987435.0000
-37	83	Abraham	Wotan	1908978016	22999735.1325
 36	1	dubbed	dubbed	28357832	28357832.0000
+37	83	Abraham	Wotan	1908978016	22999735.1325
 50	2	scribbled	tapestry	68012775	34006387.5000
 select t3.companynr+0,t3.t2nr,fld3,sum(price) from t3,t2 where t2.fld1 = t3.t2nr and t3.companynr = 37 group by 1,t3.t2nr,fld3,fld3,fld3,fld3,fld3 order by fld1;
 t3.companynr+0	t2nr	fld3	sum(price)
@@ -2066,14 +2066,14 @@ companynr
 29
 41
 34
-select t2.companynr,companyname,count(*) from t2,t4 where t2.companynr=t4.companynr group by companyname having t2.companynr >= 40;
+select t2.companynr,companyname,count(*) from t2,t4 where t2.companynr=t4.companynr group by companyname having t2.companynr >= 40 order by t2.companynr;
 companynr	companyname	count(*)
-50	company 11	11
-58	company 8	23
 40	company 5	37
-53	company 7	4
-65	company 9	10
 41	company 6	52
+50	company 11	11
+53	company 7	4
+58	company 8	23
+65	company 9	10
 68	company 10	12
 select count(*) from t2;
 count(*)

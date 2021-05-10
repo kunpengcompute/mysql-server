@@ -60,7 +60,7 @@ class Protocol_classic : public Protocol {
   THD *m_thd;
   String *packet;
   String convert;
-  uint field_pos;
+  int field_pos;
   bool send_metadata;
 #ifndef DBUG_OFF
   enum enum_field_types *field_types;

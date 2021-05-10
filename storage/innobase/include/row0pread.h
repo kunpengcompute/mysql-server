@@ -35,8 +35,6 @@ Created 2018-01-27 by Sunny Bains. */
 #include <functional>
 #include <vector>
 
-#include "os0thread-create.h"
-#include "row0sel.h"
 #include "univ.i"
 
 // Forward declarations
@@ -101,6 +99,8 @@ reference counting, this allows us to dispose of the Ctx instances
 without worrying about dangling pointers.
 
 NOTE: Secondary index scans are not supported currently. */
+class ReadView;
+
 class Parallel_reader {
  public:
   /** Maximum value for innodb-parallel-read-threads. */
@@ -170,6 +170,7 @@ class Parallel_reader {
           m_partition_id(partition_id),
           m_read_ahead(read_ahead) {}
 
+
     /** Copy constructor.
     @param[in] config           Instance to copy from. */
     Config(const Config &config)
@@ -179,7 +180,13 @@ class Parallel_reader {
           m_page_size(config.m_page_size),
           m_read_level(config.m_read_level),
           m_partition_id(config.m_partition_id),
-          m_read_ahead(config.m_read_ahead) {}
+          m_read_ahead(config.m_read_ahead),
+          m_range_errno(config.m_range_errno),
+          m_pcur(config.m_pcur),
+          m_pq_reverse_scan(config.m_pq_reverse_scan) {}
+
+    ~Config() {
+    }
 
     /** Range to scan. */
     const Scan_range m_scan_range;
@@ -202,6 +209,12 @@ class Parallel_reader {
 
     /** if true then enable separate read ahead threads. */
     bool m_read_ahead{false};
+
+    uint m_range_errno{0};
+
+    btr_pcur_t *m_pcur{nullptr};
+
+    bool m_pq_reverse_scan{false};
   };
 
   /** Constructor.
@@ -222,7 +235,7 @@ class Parallel_reader {
   static void release_threads(size_t n_threads) {
     const auto RELAXED = std::memory_order_relaxed;
     auto active = s_active_threads.fetch_sub(n_threads, RELAXED);
-    ut_a(active >= n_threads);
+    ut_a(true ||active >= n_threads);
   }
 
   /** Fallback to single threaded mode in case of out of resource
@@ -238,7 +251,7 @@ class Parallel_reader {
   @param[in]      f           Callback function.
   (default is 0 which is leaf level)
   @return error. */
-  dberr_t add_scan(trx_t *trx, const Config &config, F &&f)
+  dberr_t add_scan(trx_t *trx, const Config &config, F &&f, bool split= false)
       MY_ATTRIBUTE((warn_unused_result));
 
   /** Wait for the join of threads spawned by the parallel reader. */
@@ -275,8 +288,26 @@ class Parallel_reader {
   @return DB_SUCCESS or error code. */
   dberr_t run() MY_ATTRIBUTE((warn_unused_result));
 
+  /** dispatch a execution context to the prebuilt object */
+  dberr_t dispatch_ctx(row_prebuilt_t *prebuilt);
+
+  void ctx_completed_inc();
+
+  void pq_set_worker_done();
+
+  void pq_wakeup_workers();
+
+  void pq_set_reverse_scan();
+
+  bool pq_get_reverse_scan() { return m_pq_reverse_scan; }
+
   /** @return the configured max threads size. */
   size_t max_threads() const MY_ATTRIBUTE((warn_unused_result));
+
+  /** @return the queue size. */
+  size_t max_splits() const MY_ATTRIBUTE((warn_unused_result)) {
+    return m_ctxs.size();
+  }
 
   /** @return true if in error state. */
   bool is_error_set() const MY_ATTRIBUTE((warn_unused_result)) {
@@ -294,6 +325,14 @@ class Parallel_reader {
   Parallel_reader(const Parallel_reader &&) = delete;
   Parallel_reader &operator=(Parallel_reader &&) = delete;
   Parallel_reader &operator=(const Parallel_reader &) = delete;
+  /** obtain m_event **/
+  bool pq_have_event() { return m_event ? true : false; }
+
+  bool pq_need_change_dop() { return m_need_change_dop; }
+
+  ReadView *snapshot{};
+
+  uint key{0};
 
  private:
   /** Reset error state. */
@@ -326,8 +365,8 @@ class Parallel_reader {
   void parallel_read();
 
   /** @return true if tasks are still executing. */
-  bool is_active() const MY_ATTRIBUTE((warn_unused_result)) {
-    return (m_n_completed.load(std::memory_order_relaxed) <
+  bool is_ctx_over() const MY_ATTRIBUTE((warn_unused_result)) {
+    return !(m_n_completed.load(std::memory_order_relaxed) <
             m_ctx_id.load(std::memory_order_relaxed));
   }
 
@@ -344,6 +383,7 @@ class Parallel_reader {
   /** Start the read ahead worker threads.
   @return error code */
   dberr_t read_ahead();
+
 
  private:
   /** Read ahead request. */
@@ -378,6 +418,9 @@ class Parallel_reader {
 
   /** Maximum number of worker threads to use. */
   size_t m_max_threads{};
+
+  /** True: dop will change to m_ctxs.size() when m_ctxs.size() is less then exepected dop. */
+  bool m_need_change_dop{true};
 
   /** Mutex protecting m_ctxs. */
   mutable ib_mutex_t m_mutex;
@@ -437,8 +480,14 @@ class Parallel_reader {
   /** If the caller wants to wait for the parallel_read to finish it's run */
   bool m_sync;
 
+  /** state of worker currently doing parallel reads. */
+  std::atomic<bool> work_done{false};
+
+  bool m_pq_reverse_scan{false};
+
   friend class Ctx;
   friend class Scan_ctx;
+  friend class Parallel_reader_adapter;
 };
 
 /** Parallel reader context. */
@@ -583,8 +632,14 @@ class Parallel_reader::Scan_ctx {
                                 built from the undo log.
   @param[in,out]  mtr           Mini transaction covering the read.
   @return true if row is visible to the transaction. */
-  bool check_visibility(const rec_t *&rec, ulint *&offsets, mem_heap_t *&heap,
-                        mtr_t *mtr) MY_ATTRIBUTE((warn_unused_result));
+  bool check_visibility(const rec_t *&rec, 
+          ulint *&offsets, mem_heap_t *&heap,
+          mtr_t *mtr) MY_ATTRIBUTE((warn_unused_result));
+
+  dberr_t find_visible_record(byte *buf, const rec_t *&rec, const rec_t *&clust_rec, 
+          ulint *&offsets, ulint *&clust_offsets, mem_heap_t *&heap,
+          mtr_t *mtr, row_prebuilt_t *prebuilt = nullptr) MY_ATTRIBUTE((warn_unused_result));
+
 
   /** Read ahead from this page number.
   @param[in]  page_no           Start read ahead page number. */
@@ -683,7 +738,7 @@ class Parallel_reader::Ctx {
   @param[in]    scan_ctx        Scan context.
   @param[in]    range           Range that the thread has to read. */
   Ctx(size_t id, Scan_ctx *scan_ctx, const Scan_ctx::Range &range)
-      : m_id(id), m_range(range), m_scan_ctx(scan_ctx) {}
+      : m_id(id), m_range(range), m_scan_ctx(scan_ctx),reader(nullptr) {}
 
  public:
   /** Destructor. */
@@ -741,7 +796,6 @@ class Parallel_reader::Ctx {
     return (m_scan_ctx->m_reader->m_err.load(std::memory_order_relaxed) !=
             DB_SUCCESS);
   }
-
  private:
   /** Context ID. */
   size_t m_id{std::numeric_limits<size_t>::max()};
@@ -770,8 +824,22 @@ class Parallel_reader::Ctx {
 
   ulint *m_offsets{};
 
+  dberr_t read_record(uchar *buf, row_prebuilt_t *prebuilt) MY_ATTRIBUTE((warn_unused_result));
+
   /** Start of a new range to scan. */
   bool m_start{};
+
+  /** Current row curous */
+  btr_pcur_t *m_pcur{};   
+
+  bool start_read{true};            // start to read range's records
+  mem_heap_t *m_blob_heap{};    // heap for containing mysql records
+  mem_heap_t *m_heap{};           // heap for containing innnodb rec
+
+  ulint offsets_[REC_OFFS_NORMAL_SIZE]{};
+  ulint clust_offsets_[REC_OFFS_NORMAL_SIZE]{};
+
+  Parallel_reader *reader;
 
   friend class Parallel_reader;
 };

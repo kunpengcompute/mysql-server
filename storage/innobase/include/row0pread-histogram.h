@@ -35,6 +35,7 @@ Created 2019-04-20 by Darshan M N. */
 #include <random>
 #include "row0pread.h"
 #include "ut0counter.h"
+#include "handler.h"
 
 class Histogram_sampler {
  public:

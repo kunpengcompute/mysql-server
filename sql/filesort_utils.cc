@@ -191,6 +191,7 @@ unsigned Filesort_buffer::sort_buffer(Sort_param *param, uint count) {
       }
       return count;
     }
+    //this can ensure that smaller row_id be sorted in front.
     param->m_sort_algorithm = Sort_param::FILESORT_ALG_STD_SORT;
     sort(it_begin, it_end, Mem_compare_longkey(key_len));
     if (param->m_remove_duplicates) {

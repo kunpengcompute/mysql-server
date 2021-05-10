@@ -2717,7 +2717,9 @@ static bool tdc_wait_for_old_version(THD *thd, const char *db,
   bool res = false;
 
   mysql_mutex_lock(&LOCK_open);
-  if ((share = get_cached_table_share(db, table_name)) &&
+  // when current thread is PQ thread, no need to wait for flush tables. because flush
+  // thread is waiting PQ leader thread finish.
+  if (!thd->is_worker() && (share = get_cached_table_share(db, table_name)) &&
       share->has_old_version()) {
     struct timespec abstime;
     set_timespec(&abstime, wait_timeout);
@@ -3256,7 +3258,7 @@ retry_share : {
 
 share_found:
   if (!(flags & MYSQL_OPEN_IGNORE_FLUSH)) {
-    if (share->has_old_version()) {
+    if (!thd->is_worker() && share->has_old_version()) {
       /*
         We already have an MDL lock. But we have encountered an old
         version of table in the table definition cache which is possible
@@ -8717,7 +8719,7 @@ bool resolve_var_assignments(THD *thd, LEX *lex) {
 
 bool setup_fields(THD *thd, Ref_item_array ref_item_array, List<Item> &fields,
                   ulong want_privilege, List<Item> *sum_func_list,
-                  bool allow_sum_func, bool column_update) {
+                  bool allow_sum_func, bool column_update, bool skip_check_grant) {
   DBUG_TRACE;
 
   SELECT_LEX *const select = thd->lex->current_select();
@@ -8730,13 +8732,15 @@ bool setup_fields(THD *thd, Ref_item_array ref_item_array, List<Item> &fields,
   DBUG_ASSERT(want_privilege == 0 || want_privilege == SELECT_ACL ||
               want_privilege == INSERT_ACL || want_privilege == UPDATE_ACL);
   DBUG_ASSERT(!(column_update && (want_privilege & SELECT_ACL)));
-  if (want_privilege & SELECT_ACL)
-    thd->mark_used_columns = MARK_COLUMNS_READ;
-  else if (want_privilege & (INSERT_ACL | UPDATE_ACL) && !column_update)
-    thd->mark_used_columns = MARK_COLUMNS_WRITE;
-  else
-    thd->mark_used_columns = MARK_COLUMNS_NONE;
-
+  if (!skip_check_grant)
+  {
+    if (want_privilege & SELECT_ACL)
+      thd->mark_used_columns = MARK_COLUMNS_READ;
+    else if (want_privilege & (INSERT_ACL | UPDATE_ACL) && !column_update)
+      thd->mark_used_columns = MARK_COLUMNS_WRITE;
+    else
+      thd->mark_used_columns = MARK_COLUMNS_NONE;
+  }
   DBUG_PRINT("info", ("thd->mark_used_columns: %d", thd->mark_used_columns));
   if (allow_sum_func)
     thd->lex->allow_sum_func |= (nesting_map)1 << select->nest_level;

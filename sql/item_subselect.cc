@@ -3461,7 +3461,7 @@ bool subselect_hash_sj_engine::exec(THD *thd) {
     }
 
     /* Set tmp_param only if its usable, i.e. there are Copy_field's. */
-    tmp_param = &(item->unit->outer_select()->join->tmp_table_param);
+    tmp_param = (item->unit->outer_select()->join->tmp_table_param);
     if (tmp_param && tmp_param->copy_fields.empty()) tmp_param = nullptr;
   }  // if (!is_materialized)
 

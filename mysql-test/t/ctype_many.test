@@ -226,7 +226,18 @@ UPDATE t1 SET ucs2_f=CONVERT(utf8_f USING ucs2) WHERE ucs2_f=_ucs2'';
 SELECT comment, koi8_ru_f, utf8_f, hex(bin_f), ucs2_f, armscii8_f, greek_f FROM t1;
 SET CHARACTER SET 'binary';
 SELECT * FROM t1;
-SELECT min(comment),count(*) FROM t1 GROUP BY ucs2_f;
+
+--let $force_parallel_execute=`show variables like 'force_parallel_execute'`
+--let $pq_enable = `SELECT SUBSTRING_INDEX('$force_parallel_execute', '	', -1)`
+if($pq_enable != ON)
+{
+  SELECT min(comment),count(*) FROM t1 GROUP BY ucs2_f;
+}
+
+if($pq_enable == ON)
+{
+  SELECT min(comment),count(*) FROM t1 GROUP BY ucs2_f ORDER BY ucs2_f;
+}
 DROP TABLE t1;
 
 # End of 4.1 tests

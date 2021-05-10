@@ -54,6 +54,7 @@ class Explain_format_JSON : public Explain_format {
   virtual bool end_context(enum_parsing_context context);
   virtual bool flush_entry() { return false; }
   virtual qep_row *entry();
+  bool is_json() const override { return true; }
 };
 
 #endif  // OPT_EXPLAIN_FORMAT_JSON_INCLUDED

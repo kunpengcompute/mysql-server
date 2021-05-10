@@ -136,6 +136,8 @@
 #include "sql/xa.h"
 #include "template_utils.h"  // pointer_cast
 #include "thr_lock.h"
+#include "sql/sql_parallel.h"
+
 #ifdef _WIN32
 #include "sql/named_pipe.h"
 #endif
@@ -871,6 +873,60 @@ static Sys_var_bool Sys_windowing_use_high_precision(
     "optimization for moving window frames also for floating values.",
     HINT_UPDATEABLE SESSION_VAR(windowing_use_high_precision),
     CMD_LINE(OPT_ARG), DEFAULT(true));
+
+#ifndef DBUG_OFF
+extern bool dbug_pq_worker_stall;
+
+static Sys_var_bool Sys_Debug_pq_worker_stall(
+    "debug_pq_worker_stall",
+    "PQ worker stall while send date to message queue.",
+    HINT_UPDATEABLE GLOBAL_VAR(dbug_pq_worker_stall),
+    CMD_LINE(OPT_ARG), DEFAULT(false));
+#endif 
+
+static Sys_var_bool Sys_sql_force_parallel_execute(
+    "force_parallel_execute",
+    "force parallel execute in session",
+    HINT_UPDATEABLE SESSION_VAR(force_parallel_execute),
+    CMD_LINE(OPT_ARG), DEFAULT(0));
+
+static Sys_var_ulonglong Sys_parallel_memory_limit(
+    "parallel_memory_limit", 
+    "upper limit memory size that parallel query can use",
+    GLOBAL_VAR(parallel_memory_limit), CMD_LINE(REQUIRED_ARG),
+    VALID_RANGE(0, ULONG_MAX), DEFAULT(100*1024*1024),
+    BLOCK_SIZE(IO_SIZE), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+    ON_UPDATE(NULL));
+
+static Sys_var_ulong Sys_parallel_max_threads(
+    "parallel_max_threads",
+    "max running threads of parallel query.",
+    GLOBAL_VAR(parallel_max_threads), CMD_LINE(REQUIRED_ARG),
+    VALID_RANGE(0, ULONG_MAX), DEFAULT(64), BLOCK_SIZE(1),
+    NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
+    ON_UPDATE(NULL));
+
+static Sys_var_ulong Sys_parallel_cost_threshold(
+    "parallel_cost_threshold",
+    "Cost threshold for parallel query.",
+    SESSION_VAR(parallel_cost_threshold), CMD_LINE(REQUIRED_ARG),
+    VALID_RANGE(0, ULONG_MAX), DEFAULT(1000), BLOCK_SIZE(1),
+    NO_MUTEX_GUARD, NOT_IN_BINLOG);
+
+static Sys_var_ulong Sys_parallel_default_dop(
+    "parallel_default_dop",
+    "default degree of parallel query.",
+    SESSION_VAR(parallel_default_dop), CMD_LINE(REQUIRED_ARG),
+    VALID_RANGE(0, 1024), DEFAULT(4), BLOCK_SIZE(1),
+    NO_MUTEX_GUARD, NOT_IN_BINLOG);
+
+static Sys_var_ulong Sys_parallel_queue_timeout(
+    "parallel_queue_timeout",
+    "queue timeout for parallel query when resource is not enough ."
+    "the unit is microseconds",
+    SESSION_VAR(parallel_queue_timeout), CMD_LINE(REQUIRED_ARG),
+    VALID_RANGE(0, ULONG_MAX), DEFAULT(0), BLOCK_SIZE(1),
+    NO_MUTEX_GUARD, NOT_IN_BINLOG);
 
 static Sys_var_uint Sys_cte_max_recursion_depth(
     "cte_max_recursion_depth",

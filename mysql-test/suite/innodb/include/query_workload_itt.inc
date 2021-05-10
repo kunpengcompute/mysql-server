@@ -105,6 +105,10 @@ select * from t1 union select * from t2 order by b;
 # select with a single derived table
 explain format = json select tt.* from (select * from t1) as tt;
 select tt.* from (select * from t1) as tt;
+# In the previous version, the cost evaluation is unstable. Therefore, sleep 1 is added to ensure that 
+# t5 pages are not flushed after 'select * from t5' is executed. 
+# The cost evaluation is stable, and the t5 pages are in the memory.
+--sleep 1
 # Cost estimates are unstable since t5 pages may have been flushed from buffer
 # pool since table was created.  Do a table scan to reload pages.
 select * from t5;

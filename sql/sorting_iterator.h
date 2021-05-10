@@ -85,6 +85,8 @@ class SortingIterator final : public RowIterator {
 
   int Read() override { return m_result_iterator->Read(); }
 
+  int End() override { return m_source_iterator->End(); }
+
   void SetNullRowFlag(bool is_null_row) override {
     if (m_result_iterator == nullptr) {
       // If we don't have a result yet, it will come up with the flag unset.

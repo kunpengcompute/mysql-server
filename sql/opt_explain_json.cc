@@ -92,7 +92,8 @@ static const char *json_extra_tags[ET_total] = {
     "table_function",                      // ET_TABLE_FUNCTION
     "skip_records_in_range_due_to_force",  // ET_SKIP_RECORDS_IN_RANGE
     "using_secondary_engine",              // ET_USING_SECONDARY_ENGINE
-    "rematerialize"                        // ET_REMATERIALIZE
+    "rematerialize",                       // ET_REMATERIALIZE
+    "parallel_execute"                     // ET_PARALLEL_EXE
 };
 
 // JSON key names
@@ -170,6 +171,7 @@ class sort_ctx;
 class subquery_ctx;
 class union_result_ctx;
 class window_ctx;
+class join_ctx;
 
 /**
   @note Keep in sync with the @c list_names array.
@@ -263,6 +265,15 @@ class context : public Explain_context {
     @returns "Select number" that is associated with this node
   */
   virtual size_t id(bool hide = false) = 0;
+
+  virtual size_t join_tabs_count() {
+    DBUG_ASSERT(0);
+    return 0;
+  }
+
+  virtual sort_ctx* get_sort() { return nullptr; }
+  virtual window_ctx* get_window() { return nullptr; }
+
 
   virtual bool cacheable() {
     DBUG_ASSERT(0);
@@ -396,6 +407,13 @@ class context : public Explain_context {
     return false;
   }
 
+  virtual int add_gather(join_ctx *ctx MY_ATTRIBUTE((unused)),
+                         SELECT_LEX_UNIT *subquery
+                            MY_ATTRIBUTE((unused))) {
+    DBUG_ASSERT(0);
+    return false;
+  }
+
   /// Helper function to format output for derived subquery if any
   virtual bool format_derived(Opt_trace_context *) { return false; }
 
@@ -404,6 +422,9 @@ class context : public Explain_context {
 
   /// Helper function to format output for HAVING, ORDER/GROUP BY subqueries
   virtual bool format_unit(Opt_trace_context *) { return false; }
+
+  /// Helper function to format output for parallel gather if any
+  virtual bool format_gather(Opt_trace_context *) { return false; }
 };
 
 /**
@@ -631,7 +652,7 @@ bool table_base_ctx::format_body(Opt_trace_context *json,
                                  Opt_trace_object *obj) {
   StringBuffer<64> buff;
 
-  if (mod_type != MT_NONE) obj->add(mod_type_name[mod_type], true);
+  if (mod_type != MT_NONE && mod_type != MT_GATHER) obj->add(mod_type_name[mod_type], true);
 
   if (!col_id.is_empty() && !is_hidden_id) obj->add(K_SELECT_ID, col_id.value);
 
@@ -703,7 +724,7 @@ bool table_base_ctx::format_body(Opt_trace_context *json,
     if (format_where(json)) return true;
   }
 
-  return format_derived(json) || format_unit(json);
+  return format_gather(json) || format_derived(json) || format_unit(json);
 }
 
 /**
@@ -766,6 +787,7 @@ class union_result_ctx : public table_base_ctx, public unit_ctx {
 class table_with_where_and_derived : public table_base_ctx {
  public:
   List<subquery_ctx> where_subqueries;  ///< associated WHERE clause subqueries
+  List<join_ctx> gather;            ///< associated parallel gather
 
   table_with_where_and_derived(enum_parsing_context type_arg,
                                const char *name_arg, context *parent_arg)
@@ -798,6 +820,8 @@ class table_with_where_and_derived : public table_base_ctx {
     }
     return false;
   }
+
+  virtual bool format_gather(Opt_trace_context *json);
 };
 
 /**
@@ -844,6 +868,9 @@ class message_ctx : public joinable_ctx, public table_with_where_and_derived {
   virtual bool format_derived(Opt_trace_context *json) {
     return table_with_where_and_derived::format_derived(json);
   }
+  virtual bool format_gather(Opt_trace_context *json) {
+    return table_with_where_and_derived::format_gather(json);
+  }
   virtual bool format_where(Opt_trace_context *json) {
     return table_with_where_and_derived::format_where(json);
   }
@@ -861,6 +888,9 @@ class message_ctx : public joinable_ctx, public table_with_where_and_derived {
 
   virtual int add_where_subquery(subquery_ctx *ctx, SELECT_LEX_UNIT *) {
     return where_subqueries.push_back(ctx);
+  }
+  virtual int add_gather(join_ctx *ctx, SELECT_LEX_UNIT *) {
+    return gather.push_back(ctx);
   }
 };
 
@@ -895,6 +925,9 @@ class join_tab_ctx : public joinable_ctx, public table_with_where_and_derived {
   virtual bool format_derived(Opt_trace_context *json) {
     return table_with_where_and_derived::format_derived(json);
   }
+  virtual bool format_gather(Opt_trace_context *json) {
+    return table_with_where_and_derived::format_gather(json);
+  }
   virtual bool format_where(Opt_trace_context *json) {
     return table_with_where_and_derived::format_where(json);
   }
@@ -920,6 +953,10 @@ class join_tab_ctx : public joinable_ctx, public table_with_where_and_derived {
       if (u == subquery) return where_subqueries.push_back(ctx);
     }
     return -1;
+  }
+
+  virtual int add_gather(join_ctx *ctx, SELECT_LEX_UNIT *subquery MY_ATTRIBUTE((unused))) {
+    return gather.push_back(ctx);
   }
 
   virtual bool find_and_set_derived(context *subquery) {
@@ -967,6 +1004,10 @@ class simple_sort_ctx : public joinable_ctx {
 
   virtual int add_where_subquery(subquery_ctx *ctx, SELECT_LEX_UNIT *subquery) {
     return join_tab->add_where_subquery(ctx, subquery);
+  }
+
+  virtual int add_gather(join_ctx *ctx, SELECT_LEX_UNIT *subquery) {
+    return join_tab->add_gather(ctx, subquery);
   }
 
   virtual bool find_and_set_derived(context *subquery) {
@@ -1029,6 +1070,7 @@ class simple_sort_with_subqueries_ctx : public simple_sort_ctx {
 class join_ctx : public unit_ctx, virtual public qep_row {
  protected:
   List<joinable_ctx> join_tabs;  ///< hosted JOIN_TAB nodes
+ public:
   sort_ctx *sort;
   window_ctx *window;
 
@@ -1077,6 +1119,10 @@ class join_ctx : public unit_ctx, virtual public qep_row {
   virtual bool cacheable();
   virtual bool dependent();
   virtual int add_where_subquery(subquery_ctx *ctx, SELECT_LEX_UNIT *subquery);
+  virtual int add_gather(join_ctx *ctx, SELECT_LEX_UNIT *subquery);
+  virtual size_t join_tabs_count() { return join_tabs.elements; }
+  virtual sort_ctx* get_sort() { return sort; }
+  virtual window_ctx* get_window() { return window; }
 };
 
 /**
@@ -1321,6 +1367,8 @@ bool join_ctx::format_body(Opt_trace_context *json, Opt_trace_object *obj) {
       Opt_trace_object insert_from(json, "insert_from");
       if (format_body_inner(json, obj)) return true; /* purecov: inspected */
     }
+  } else if (join_tabs.elements && (join_tabs.head()->get_mod_type() == MT_GATHER)) {
+    join_tabs.head()->format(json);
   } else if (format_body_inner(json, obj))
     return true; /* purecov: inspected */
   return format_unit(json);
@@ -1356,6 +1404,7 @@ bool join_ctx::format_nested_loop(Opt_trace_context *json) {
     it++;
     join_tab_num--;
   }
+
   /*
     For single table skip "nested_loop" object creation and
     format its contents only (the 1st join_tab).
@@ -1450,6 +1499,21 @@ int join_ctx::add_where_subquery(subquery_ctx *ctx, SELECT_LEX_UNIT *subquery) {
   return false;
 }
 
+int join_ctx::add_gather(join_ctx *ctx, SELECT_LEX_UNIT *subquery) {
+  if (sort)
+    return sort->join_ctx::add_gather(ctx, subquery);
+  else if (window)
+    return window->join_ctx::add_gather(ctx, subquery);
+
+  List_iterator<joinable_ctx> it(join_tabs);
+  joinable_ctx *j;
+  while ((j = it++)) {
+    int ret = j->add_gather(ctx, subquery);
+    if (ret > 0) return true;
+  }
+  return false;
+}
+
 /**
   Context class to group materialized JOIN_TABs to "materialized" array.
   Is used for semijoin materialization.
@@ -1487,6 +1551,9 @@ class materialize_ctx : public joinable_ctx,
   }
   virtual int add_where_subquery(subquery_ctx *ctx, SELECT_LEX_UNIT *subquery) {
     return join_ctx::add_where_subquery(ctx, subquery);
+  }
+  virtual int add_gather(join_ctx *ctx, SELECT_LEX_UNIT *subquery) {
+    return join_ctx::add_gather(ctx, subquery);
   }
   virtual bool find_and_set_derived(context *subquery) {
     return join_ctx::find_and_set_derived(subquery);
@@ -1537,6 +1604,37 @@ class materialize_ctx : public joinable_ctx,
   }
 };
 
+bool table_with_where_and_derived::format_gather(Opt_trace_context *json) {
+  if (gather.elements == 0)
+    return false;
+  else if (gather.elements == 1) {
+    if (gather.head()->get_sort())
+      return gather.head()->get_sort()->join_ctx::format(json);
+    else if (gather.head()->get_window())
+      return gather.head()->get_window()->join_ctx::format(json);
+    else if (gather.head()->join_tabs_count()) {
+      return gather.head()->format(json);
+    }
+  }
+  else {
+    Opt_trace_array loops(json, K_NESTED_LOOP);
+
+    List_iterator<join_ctx> it(gather);
+    context *c;
+    while ((c = it++)) {
+      Opt_trace_object anonymous_wrapper(json);
+      if (c->get_sort())
+        return c->get_sort()->join_ctx::format(json);
+      else if (c->get_window())
+        return c->get_window()->join_ctx::format(json);
+      else if (c->join_tabs_count() && c->format(json)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
   Context class to represent JOIN_TABs in duplication weedout sequence
 */
@@ -1562,6 +1660,9 @@ class duplication_weedout_ctx : public joinable_ctx, public join_ctx {
   }
   virtual int add_where_subquery(subquery_ctx *ctx, SELECT_LEX_UNIT *subquery) {
     return join_ctx::add_where_subquery(ctx, subquery);
+  }
+  virtual int add_gather(join_ctx *ctx, SELECT_LEX_UNIT *subquery) {
+    return join_ctx::add_gather(ctx, subquery);
   }
   virtual bool find_and_set_derived(context *subquery) {
     return join_ctx::find_and_set_derived(subquery);
@@ -1684,7 +1785,7 @@ bool Explain_format_JSON::begin_context(enum_parsing_context ctx_arg,
         return true;
       break;
     case CTX_ORDER_BY: {
-      DBUG_ASSERT(current_context->type == CTX_JOIN);
+      DBUG_ASSERT(current_context->type == CTX_JOIN || current_context->type == CTX_GATHER);
       sort_ctx *ctx = new (*THR_MALLOC) sort_with_subqueries_ctx(
           CTX_ORDER_BY, K_ORDERING_OPERATION, current_context, SQ_ORDER_BY,
           flags, ESC_ORDER_BY);
@@ -1697,7 +1798,8 @@ bool Explain_format_JSON::begin_context(enum_parsing_context ctx_arg,
       DBUG_ASSERT(current_context->type == CTX_JOIN ||
                   current_context->type == CTX_ORDER_BY ||
                   current_context->type == CTX_DISTINCT ||
-                  current_context->type == CTX_WINDOW);
+                  current_context->type == CTX_WINDOW ||
+                  current_context->type == CTX_GATHER);
       sort_ctx *ctx = new (*THR_MALLOC) sort_with_subqueries_ctx(
           CTX_GROUP_BY, K_GROUPING_OPERATION, current_context, SQ_GROUP_BY,
           flags, ESC_GROUP_BY);
@@ -1722,7 +1824,8 @@ bool Explain_format_JSON::begin_context(enum_parsing_context ctx_arg,
                   current_context->type == CTX_ORDER_BY ||
                   current_context->type == CTX_DISTINCT ||
                   current_context->type == CTX_WINDOW ||
-                  current_context->type == CTX_GROUP_BY);
+                  current_context->type == CTX_GROUP_BY ||
+                  current_context->type == CTX_GATHER);
       sort_ctx *ctx =
           new (*THR_MALLOC) sort_ctx(CTX_BUFFER_RESULT, K_BUFFER_RESULT,
                                      current_context, flags, ESC_BUFFER_RESULT);
@@ -1742,7 +1845,8 @@ bool Explain_format_JSON::begin_context(enum_parsing_context ctx_arg,
                   current_context->type == CTX_BUFFER_RESULT ||
                   current_context->type == CTX_SIMPLE_GROUP_BY ||
                   current_context->type == CTX_SIMPLE_ORDER_BY ||
-                  current_context->type == CTX_SIMPLE_DISTINCT);
+                  current_context->type == CTX_SIMPLE_DISTINCT ||
+                  current_context->type == CTX_GATHER);
       join_tab_ctx *ctx =
           new (*THR_MALLOC) join_tab_ctx(CTX_QEP_TAB, current_context);
       if (ctx == nullptr || current_context->add_join_tab(ctx)) return true;
@@ -1882,6 +1986,14 @@ bool Explain_format_JSON::begin_context(enum_parsing_context ctx_arg,
       subquery_ctx *ctx =
           new (*THR_MALLOC) subquery_ctx(CTX_WHERE, nullptr, current_context);
       if (ctx == nullptr || current_context->add_where_subquery(ctx, subquery))
+        return true;
+      current_context = ctx;
+      break;
+    }
+    case CTX_GATHER: {
+      join_ctx *ctx =
+          new (*THR_MALLOC) join_ctx(CTX_GATHER, K_QUERY_BLOCK, current_context);
+      if (ctx == nullptr || current_context->add_gather(ctx, subquery))
         return true;
       current_context = ctx;
       break;

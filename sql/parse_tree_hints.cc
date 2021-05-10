@@ -266,6 +266,15 @@ bool PT_qb_level_hint::contextualize(Parse_context *pc) {
       else
         pc->select->add_base_options(SELECT_STRAIGHT_JOIN);
       break;
+    case PQ_HINT_ENUM:
+      if (args > 0)
+        pc->thd->pq_dop = args;
+      else
+        pc->thd->pq_dop = pc->thd->variables.parallel_default_dop;
+      break;
+    case NO_PQ_HINT_ENUM:
+        pc->thd->no_pq = true; 
+      break;
     default:
       DBUG_ASSERT(0);
   }

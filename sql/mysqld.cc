@@ -20,6 +20,7 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
+
 /**
   @file sql/mysqld.cc
   MySQL server daemon.
@@ -711,6 +712,7 @@ The documentation is based on the source files such as:
 #include "thr_mutex.h"
 #include "typelib.h"
 #include "violite.h"
+#include "sql/sql_parallel.h"
 
 #ifdef WITH_PERFSCHEMA_STORAGE_ENGINE
 #include "storage/perfschema/pfs_server.h"
@@ -946,6 +948,8 @@ static PSI_mutex_key key_LOCK_keyring_operations;
 static PSI_mutex_key key_LOCK_tls_ctx_options;
 static PSI_mutex_key key_LOCK_rotate_binlog_master_key;
 #endif /* HAVE_PSI_INTERFACE */
+static PSI_mutex_key key_LOCK_pq_threads_running;
+static PSI_cond_key key_COND_pq_threads_running;
 
 /**
   Statement instrumentation key for replication.
@@ -2441,6 +2445,8 @@ static void clean_up_mutexes() {
   mysql_mutex_destroy(&LOCK_keyring_operations);
   mysql_mutex_destroy(&LOCK_tls_ctx_options);
   mysql_mutex_destroy(&LOCK_rotate_binlog_master_key);
+  mysql_mutex_destroy(&LOCK_pq_threads_running);
+  mysql_cond_destroy(&COND_pq_threads_running);
 }
 
 /****************************************************************************
@@ -4849,6 +4855,8 @@ static int init_thread_environment() {
                    MY_MUTEX_INIT_FAST);
   mysql_mutex_init(key_LOCK_rotate_binlog_master_key,
                    &LOCK_rotate_binlog_master_key, MY_MUTEX_INIT_FAST);
+  mysql_mutex_init(key_LOCK_pq_threads_running, &LOCK_pq_threads_running, MY_MUTEX_INIT_FAST);
+  mysql_cond_init(key_COND_pq_threads_running, &COND_pq_threads_running);
   return 0;
 }
 
@@ -8204,6 +8212,20 @@ static int show_net_compression(THD *thd, SHOW_VAR *var, char *buff) {
   return 0;
 }
 
+static int show_pq_memory(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_INT;
+  var->value = buff;
+ 
+  uint sum_memory = 0;
+  for (uint i = 0; i < PQ_MEMORY_USED_BUCKET; i++)
+    sum_memory += atomic_add<uint>(pq_memory_used[i], 0);
+
+  unsigned int *value = reinterpret_cast<unsigned int *>(buff);
+  *value = sum_memory;
+  return 0;
+}
+
+
 static int show_net_compression_algorithm(THD *thd, SHOW_VAR *var, char *buff) {
   const char *s = thd->get_protocol()->get_compression_algorithm();
   var->type = SHOW_CHAR;
@@ -8777,6 +8799,13 @@ SHOW_VAR status_vars[] = {
      SHOW_SCOPE_ALL},
     {"Prepared_stmt_count", (char *)&show_prepared_stmt_count, SHOW_FUNC,
      SHOW_SCOPE_GLOBAL},
+    {"PQ_threads_refused", (char*)&parallel_threads_refused, SHOW_INT, 
+     SHOW_SCOPE_GLOBAL},
+    {"PQ_memory_refused", (char*)&parallel_memory_refused, SHOW_INT, 
+     SHOW_SCOPE_GLOBAL},
+    {"PQ_threads_running", (char*)&parallel_threads_running, SHOW_INT, 
+     SHOW_SCOPE_GLOBAL},
+    {"PQ_memory_used", (char*)&show_pq_memory, SHOW_FUNC, SHOW_SCOPE_GLOBAL},
     {"Queries", (char *)&show_queries, SHOW_FUNC, SHOW_SCOPE_ALL},
     {"Questions", (char *)offsetof(System_status_var, questions),
      SHOW_LONGLONG_STATUS, SHOW_SCOPE_ALL},
@@ -10671,7 +10700,8 @@ static PSI_mutex_info all_server_mutexes[]=
   { &key_LOCK_password_reuse_interval, "LOCK_password_reuse_interval", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_LOCK_keyring_operations, "LOCK_keyring_operations", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_LOCK_tls_ctx_options, "LOCK_tls_ctx_options", 0, 0, "A lock to control all of the --ssl-* CTX related command line options"},
-  { &key_LOCK_rotate_binlog_master_key, "LOCK_rotate_binlog_master_key", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME}
+  { &key_LOCK_rotate_binlog_master_key, "LOCK_rotate_binlog_master_key", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
+  { &key_LOCK_pq_threads_running, "LOCK_pq_threads_running", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME}
 };
 /* clang-format on */
 
@@ -10782,7 +10812,8 @@ static PSI_cond_info all_server_conds[]=
   { &key_gtid_ensure_index_cond, "Gtid_state", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_COND_compress_gtid_table, "COND_compress_gtid_table", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_commit_order_manager_cond, "Commit_order_manager::m_workers.cond", 0, 0, PSI_DOCUMENT_ME},
-  { &key_cond_slave_worker_hash, "Relay_log_info::slave_worker_hash_lock", 0, 0, PSI_DOCUMENT_ME}
+  { &key_cond_slave_worker_hash, "Relay_log_info::slave_worker_hash_lock", 0, 0, PSI_DOCUMENT_ME},
+  { &key_COND_pq_threads_running, "COND_pq_threads_running", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME}
 };
 /* clang-format on */
 
@@ -10792,6 +10823,7 @@ PSI_thread_key key_thread_one_connection;
 PSI_thread_key key_thread_compress_gtid_table;
 PSI_thread_key key_thread_parser_service;
 PSI_thread_key key_thread_handle_con_admin_sockets;
+PSI_thread_key key_thread_parallel_query;
 
 /* clang-format off */
 static PSI_thread_info all_server_threads[]=
@@ -10810,6 +10842,7 @@ static PSI_thread_info all_server_threads[]=
   { &key_thread_compress_gtid_table, "compress_gtid_table", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_thread_parser_service, "parser_service", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
   { &key_thread_handle_con_admin_sockets, "admin_interface", PSI_FLAG_USER, 0, PSI_DOCUMENT_ME},
+  { &key_thread_parallel_query, "parallel_query", PSI_FLAG_SINGLETON, 0, PSI_DOCUMENT_ME},
 };
 /* clang-format on */
 
