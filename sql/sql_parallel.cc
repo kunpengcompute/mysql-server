@@ -524,7 +524,7 @@ static void restore_leader_plan(JOIN *join) {
  *    ABORT_EXEC: run error in parallal mode and then drop it
  */
 PQ_exec_status make_pq_leader_plan(THD *thd) {
-  if (!check_pq_condition(thd)) {
+  if (!check_pq_conditions(thd)) {
     thd->m_suite_for_pq = PqConditionStatus::NOT_SUPPORTED;
     return PQ_exec_status::SEQ_EXEC;
   } else {
