@@ -172,7 +172,7 @@ public:
 };
 
 Gather_operator *make_pq_gather_operator(JOIN *join, QEP_TAB *tab, uint dop);
-PQ_exec_status make_pq_leader_plan(JOIN *join, uint dop);
+PQ_exec_status make_pq_leader_plan(THD *thd);
 void *pq_worker_exec(void *arg);
 bool pq_build_sum_funcs(THD *thd, SELECT_LEX *select, Ref_item_array &ref_ptr,
                         List<Item> &fields, uint elements,

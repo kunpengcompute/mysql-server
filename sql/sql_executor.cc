@@ -6500,7 +6500,7 @@ bool change_to_use_tmp_fields(List<Item> &all_fields,
 #ifndef DBUG_OFF
       /* Do not set the item_name here when parallel query to keep the MTR 
          execution results of the release and debug versions same. */
-      if (!item_field->item_name.is_set() && !thd->m_suite_for_pq) {
+      if (!item_field->item_name.is_set() && thd->m_suite_for_pq == PqConditionStatus::NOT_SUPPORTED) {
         char buff[256];
         String str(buff, sizeof(buff), &my_charset_bin);
         str.length(0);
