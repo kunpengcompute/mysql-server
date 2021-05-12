@@ -798,14 +798,6 @@ bool suite_for_parallel_query(JOIN *join) {
   if (!check_pq_select_fields(join)) {
 	  return false;
   }
-  
-  TABLE *tb = nullptr;
-  for (uint i = 0; i < join->primary_tables; i++) {
-    tb = join->qep_tab[i].table();
-    if (tb->reginfo.not_exists_optimize) {
-      return false;
-    }
-  }
 
   return true;  
 }

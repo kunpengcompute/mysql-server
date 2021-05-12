@@ -34,6 +34,7 @@
 #include "sql/log.h"
 #include "sql/parse_tree_items.h"
 #include "sql/pq_clone.h"
+#include "sql/sql_optimizer.h"
 
 #define CHECK_TYPE(T)                                                   \
   if (typeid(*this) != typeid(T) ||                                     \
@@ -654,7 +655,6 @@ PQ_COPY_FROM_DEF(Item_equal, Item_bool_func) {
 PQ_COPY_FROM_RETURN
 
 COPY_FUNC_ITEM(Item_func_true, POS())
-COPY_FUNC_ITEM(Item_func_false, POS())
 
 COPY_FUNC_ITEM(Item_func_isnotnull, ARG0)
 
@@ -1702,5 +1702,18 @@ Item *Item_func_current_user::pq_clone(THD *thd, SELECT_LEX *select) {
 
 COPY_FUNC_ITEM(Item_func_benchmark, POS(), ARG0, ARG1)
 COPY_FUNC_ITEM(Item_func_found_rows, POS())
+
+Item *Item_func_false::pq_clone(THD *thd, SELECT_LEX *select) {
+  CHECK_TYPE(Item_func_false);
+
+  Item *new_item = new (thd->pq_mem_root) Item_func_false(POS());
+  COPY_SELF_ATTR(new_item)
+
+  if (item_name.ptr() == antijoin_null_cond) {
+    new_item->item_name.set(antijoin_null_cond);
+  }
+
+  return new_item;
+}
 
 #endif
