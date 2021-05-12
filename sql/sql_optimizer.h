@@ -669,8 +669,6 @@ class JOIN {
   */
   bool plan_is_single_table() { return primary_tables - const_tables == 1; }
 
-  bool check_pq_select_fields();
-  bool choose_parallel_tables();
   bool optimize();
   void reset();
   bool prepare_result();

@@ -1107,20 +1107,6 @@ void THD::release_resources() {
   m_release_resources_done = true;
 }
 
-bool THD::suite_for_parallel_query() {
-  if (no_pq ||
-      !pq_dop ||
-      lex->in_execute_ps ||
-      in_sp_trigger  ||                   // store procedure or trigger
-      m_attachable_trx   ||               // attachable transaction
-      tx_isolation == ISO_SERIALIZABLE)   // serializable without snapshot read
-  {
-    return false;
-  }
-  return true;
-}
-
-
 THD::~THD() {
   THD_CHECK_SENTRY(this);
   DBUG_TRACE;

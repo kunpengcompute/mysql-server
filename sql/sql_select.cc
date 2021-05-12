@@ -938,11 +938,9 @@ bool Sql_cmd_dml::execute_inner(THD *thd){
   // Perform secondary engine optimizations, if needed.
   if (optimize_secondary_engine(thd)) return true;
 
-  if (thd->pq_dop && unit->is_simple())
+  if (thd->m_suite_for_pq == PqConditionStatus::ENABLED)
   {
-    JOIN *join= unit->first_select()->join;
-    PQ_exec_status status = make_pq_leader_plan(join, thd->pq_dop);
-
+    PQ_exec_status status = make_pq_leader_plan(thd);
     if (status == PQ_exec_status::ABORT_EXEC)
       return true;
     

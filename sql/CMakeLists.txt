@@ -507,6 +507,7 @@ SET(SQL_SHARED_SOURCES
   sql_manager.cc
   sql_optimizer.cc
   sql_parallel.cc
+  pq_condition.cc
   pq_clone.cc
   pq_clone_item.cc
   sql_parse.cc

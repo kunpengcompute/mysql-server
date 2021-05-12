@@ -513,11 +513,11 @@ bool SELECT_LEX:: prepare(THD *thd) {
   */
   if (m_windows.elements != 0) Window::remove_unused_windows(thd, m_windows);
 
-  if (suite_for_parallel_query(thd)) {
-    if (group_list.elements)
+  if (thd->m_suite_for_pq == PqConditionStatus::ENABLED) {
+    if (group_list.elements > 0)
       fix_prepare_information_for_order(thd, &group_list,
                                         &saved_group_list_ptrs);
-    if (order_list.elements)
+    if (order_list.elements > 0)
       fix_prepare_information_for_order(thd, &order_list,
                                         &saved_order_list_ptrs);
   }
