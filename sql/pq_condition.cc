@@ -761,11 +761,16 @@ bool suite_for_parallel_query(SELECT_LEX *select) {
   
   for (TABLE_LIST *tbl_list = select->table_list.first; tbl_list != nullptr;
        tbl_list = tbl_list->next_local) {
+    // skip view
+    if (table_list->is_view()) {
+      return false;
+    }
+
     // skip explicit table lock
     if (tbl_list->lock_descriptor().type > TL_READ ||
         current_thd->locking_clause) {
       return false;
-	}
+    }
 
     TABLE *tb = tbl_list->table;
     if (tb != nullptr &&
