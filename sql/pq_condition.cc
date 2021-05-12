@@ -85,7 +85,6 @@ static const char* NO_PQ_SUPPORTED_FUNC_NO_ARGS [] = {
 };
 
 static const Item_ref::Ref_Type NO_PQ_SUPPORTED_REF_TYPES[] = {
-    Item_ref::VIEW_REF,
     Item_ref::OUTER_REF,
     Item_ref::AGGREGATE_REF
 };
@@ -762,13 +761,8 @@ bool suite_for_parallel_query(SELECT_LEX *select) {
   
   for (TABLE_LIST *tbl_list = select->table_list.first; tbl_list != nullptr;
        tbl_list = tbl_list->next_local) {
-    // skip derived table or view
-    if (tbl_list->is_view_or_derived()) {
-      return false;
-    }
-
     // skip explicit table lock
-    if (tbl_list->lock_descriptor().type > TL_READ_DEFAULT ||
+    if (tbl_list->lock_descriptor().type > TL_READ ||
         current_thd->locking_clause) {
       return false;
 	}

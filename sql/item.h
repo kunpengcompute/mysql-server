@@ -5210,6 +5210,8 @@ class Item_view_ref final : public Item_ref {
 
   bool fix_fields(THD *, Item **) override;
 
+  Item* pq_clone(THD *thd, SELECT_LEX *select) override;
+  
   /**
     Takes into account whether an Item in a derived table / view is part of an
     inner table of an outer join.
