@@ -762,7 +762,7 @@ bool suite_for_parallel_query(SELECT_LEX *select) {
   for (TABLE_LIST *tbl_list = select->table_list.first; tbl_list != nullptr;
        tbl_list = tbl_list->next_local) {
     // skip view
-    if (table_list->is_view()) {
+    if (tbl_list->is_view()) {
       return false;
     }
 
