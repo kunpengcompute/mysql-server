@@ -398,8 +398,8 @@ SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
   thd->lex->select_lex = select;
 
   // phase 1. clone tables and open/lock them
-  for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr;
-       tbl_list = tbl_list->next_local) {
+  for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr;
+       tbl_list = tbl_list->next_leaf) {
     LEX_CSTRING *db_name =
         new(thd->pq_mem_root) LEX_CSTRING{tbl_list->db, tbl_list->db_length};
     if (db_name == nullptr) {
@@ -431,8 +431,8 @@ SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
   // before setup_fields, propagate_nullability will change table->nullable,
   // which may affect item->maybe_null, so we copy it here.
   // see in SELECT_LEX:: prepare
-  for (TABLE_LIST *tl = orig->table_list.first; tl != nullptr; tl = tl->next_local) {
-    for (TABLE_LIST *tbl_list = select->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+  for (TABLE_LIST *tl = orig->leaf_tables; tl != nullptr; tl = tl->next_leaf) {
+    for (TABLE_LIST *tbl_list = select->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_leaf) {
       const char *db = tbl_list->db;
       const char *table_name = tbl_list->table_name;
       const char *alias = tbl_list->alias;
