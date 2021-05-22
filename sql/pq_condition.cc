@@ -750,6 +750,28 @@ bool suite_for_parallel_query(SELECT_LEX_UNIT *unit) {
   return true;
 }
 
+bool suite_for_parallel_query(TABLE_LIST *tbl_list) {
+  if (tbl_list->is_view()) {
+    return false;
+  }
+
+  // skip explicit table lock
+  if (tbl_list->lock_descriptor().type > TL_READ ||
+      current_thd->locking_clause) {
+    return false;
+  }
+
+  TABLE *tb = tbl_list->table;
+  if (tb != nullptr &&
+      (tb->s->tmp_table != NO_TMP_TABLE ||         // template table
+        tb->file->ht->db_type != DB_TYPE_INNODB ||  // Non-InnoDB table
+        tb->part_info ||                            // partition table
+        tb->fulltext_searched)) {                     // fulltext match search
+    return false;
+	}
+  return true; 
+}
+
 bool suite_for_parallel_query(SELECT_LEX *select) {
   if (select->first_inner_unit() != nullptr ||     // nesting subquery, including view〝derived table〝subquery condition and so on.
       select->outer_select() != nullptr ||         // nested subquery
@@ -761,27 +783,17 @@ bool suite_for_parallel_query(SELECT_LEX *select) {
   
   for (TABLE_LIST *tbl_list = select->table_list.first; tbl_list != nullptr;
        tbl_list = tbl_list->next_local) {
-    // skip view
-    if (tbl_list->is_view()) {
-      return false;
+    if (!suite_for_parallel_query(tbl_list)) {
+      return false;   
     }
-
-    // skip explicit table lock
-    if (tbl_list->lock_descriptor().type > TL_READ ||
-        current_thd->locking_clause) {
-      return false;
-    }
-
-    TABLE *tb = tbl_list->table;
-    if (tb != nullptr &&
-        (tb->s->tmp_table != NO_TMP_TABLE ||         // template table
-         tb->file->ht->db_type != DB_TYPE_INNODB ||  // Non-InnoDB table
-         tb->part_info ||                            // partition table
-         tb->fulltext_searched)) {                     // fulltext match search
-      return false;
-	  }
   }
-
+  
+  for (TABLE_LIST *tbl_list = select->leaf_tables; tbl_list != nullptr;
+       tbl_list = tbl_list->next_leaf) {
+    if (!suite_for_parallel_query(tbl_list)) {
+      return false;   
+    }
+  }
   return true;
 }
 
