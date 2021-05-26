@@ -1290,6 +1290,7 @@ bool JOIN::alloc_qep1(uint n) {
   for (uint i=0; i < n; i++){
       qep_tab1[i].set_qs(qep_tab0[i].get_qs());
       qep_tab1[i].set_join(this);
+      qep_tab1[i].match_tab = qep_tab0[i].match_tab;
       qep_tab1[i].op_type = qep_tab0[i].op_type;
       qep_tab1[i].table_ref = qep_tab0[i].table_ref;
       qep_tab1[i].using_dynamic_range = qep_tab0[i].using_dynamic_range;
