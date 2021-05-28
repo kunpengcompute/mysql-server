@@ -185,7 +185,41 @@ bool TABLE_REF::pq_copy(JOIN *join, TABLE_REF *ref, QEP_TAB *qep_tab) {
   return false;
 }
 
+bool is_same_table(QEP_TAB *src, const char *db, const char *table_name, const char *table_ref_alias) {
+  if (!strcmp(db, src->db->str) &&
+      !strcmp(table_name, src->table_name->str) &&
+      !strcmp(table_ref_alias, src->table_ref->alias)) {
+    return true;
+  }
+  return false;
+}
 
+int get_table_index(QEP_TAB *src, JOIN *join, uint list_size) {
+  int index = 0;
+  for (uint i = 0; i < list_size; i++) {
+    QEP_TAB *tab = &join->qep_tab[i];
+    if (tab->table_ref == nullptr) {
+      continue;
+    }
+    if (is_same_table(src, tab->db->str, tab->table_name->str, tab->table_ref->alias)) {
+      index++;
+    }
+  }
+  return index;
+}
+
+TABLE_LIST *get_table(QEP_TAB *src, int index, SELECT_LEX *select) {
+  int same_num = 0;
+  for (TABLE_LIST *tl = select->leaf_tables; tl != nullptr; tl = tl->next_leaf) {
+    if (is_same_table(src, tl->db, tl->table_name, tl->alias)) {
+      same_num++;
+      if (same_num - 1 == index) {
+        return tl;
+      }
+    }
+  }
+  return nullptr;
+}
 
 /**
  * duplicate qep_tabs in JOIN
@@ -213,6 +247,7 @@ bool pq_dup_tabs(JOIN *join, JOIN *orig, bool setup MY_ATTRIBUTE((unused))) {
     join->qep_tab[i].set_qs(&qs[i]);
     join->qep_tab[i].set_join(join);
     join->qep_tab[i].set_idx(i);
+    join->qep_tab[i].match_tab = orig->qep_tab[i].match_tab;
     join->qep_tab[i].op_type = orig->qep_tab[i].op_type;
     join->qep_tab[i].table_ref = orig->qep_tab[i].table_ref;
     join->qep_tab[i].using_dynamic_range = orig->qep_tab[i].using_dynamic_range;
@@ -238,27 +273,23 @@ bool pq_dup_tabs(JOIN *join, JOIN *orig, bool setup MY_ATTRIBUTE((unused))) {
      * field.
      */
     DBUG_ASSERT(select->leaf_tables);
-    LEX_CSTRING *db = tab->db;
-    LEX_CSTRING *table_name = tab->table_name;
-    const char *table_ref_alias = tab->table_ref->alias;
-
-    // setup physic table object
-    for (TABLE_LIST *tl = select->leaf_tables; tl != nullptr;
-         tl = tl->next_leaf) {
-      if (!strncmp(db->str, tl->db, db->length) &&
-          strlen(tl->db) == db->length &&
-          !strncmp(table_name->str, tl->table_name, table_name->length) &&
-          strlen(tl->table_name) == table_name->length &&
-          !strncmp(table_ref_alias, tl->alias, strlen(table_ref_alias)) &&
-          strlen(table_ref_alias) == strlen(tl->alias)) {
-        bitmap_copy(tl->table->read_set,tab->table_ref->table->read_set);
-        bitmap_copy(tl->table->write_set,tab->table_ref->table->write_set);
-        tab->set_table(tl->table);
-        tab->table_ref = tl;
-        break;
-      }
+    /*
+     * setup physic table object
+     * Sometimes there are multiple tables with the same name in the leaf_tables,
+     * such as select empnum from t1 where hours in (select hours from t1);
+     * The leaf_tables has two t1's in it,at this point we need to copy the
+     * corresponding table of the same name.
+     */
+    int index = get_table_index(tab, join, i);
+    TABLE_LIST *tl = get_table(tab, index, select);
+    if (tl == nullptr) {
+      goto err;
     }
-
+    bitmap_copy(tl->table->read_set,tab->table_ref->table->read_set);
+    bitmap_copy(tl->table->write_set,tab->table_ref->table->write_set);
+    tab->set_table(tl->table);
+    tab->table_ref = tl;
+    
     //phase 4. Copy table properties from leader
     if (tab->ref().pq_copy(join, &orig_tab->ref(), tab))
       goto err;
@@ -412,8 +443,14 @@ SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
     }
     Table_ident *tbl_ident =
         new(thd->pq_mem_root) Table_ident(*db_name, *tbl_name);
-    if (!tbl_ident || !select->add_table_to_list(thd, tbl_ident, tbl_list->alias, 0))
+    if (!tbl_ident) {
       goto err;
+    }
+    TABLE_LIST * tbl = select->add_table_to_list(thd, tbl_ident, tbl_list->alias, 0, TL_IGNORE);
+    if (!tbl ) {
+      goto err;
+    }
+    tbl->set_lock({TL_UNLOCK, THR_DEFAULT});
   }
 
   DBUG_ASSERT(select->context.select_lex == select);
