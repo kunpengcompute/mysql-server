@@ -210,7 +210,8 @@ void pq_replace_avg_func(THD *thd, SELECT_LEX *select MY_ATTRIBUTE((unused)),
       fields->replace(i, item_avg);
 
     } else if (item->real_item()->type() == Item::FIELD_ITEM) {
-      Item_sum *item_sum = down_cast<Item_field *>(item)->field->item_sum_ref;
+      Item_field *item_field = dynamic_cast<Item_field *>(item->real_item());
+      Item_sum *item_sum = item_field->field->item_sum_ref;
       if (item_sum && item_sum->sum_func() == Item_sum::AVG_FUNC) {
         Item_sum_avg *item_avg= down_cast<Item_sum_avg *>(item_sum);
         item_avg->pq_avg_type= PQ_LEADER;
