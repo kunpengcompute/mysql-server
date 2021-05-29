@@ -1209,6 +1209,7 @@ SJ_TMP_TABLE *create_sj_tmp_table(THD *thd, JOIN *join,
     if (!(sjtbl = new (thd->mem_root) SJ_TMP_TABLE))
       return nullptr; /* purecov: inspected */
     sjtbl->tmp_table = nullptr;
+    sjtbl->tabs = nullptr;
     sjtbl->is_confluent = true;
     sjtbl->have_confluent_row = false;
   }
