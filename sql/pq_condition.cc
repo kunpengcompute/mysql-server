@@ -29,7 +29,7 @@
 #include "sql/mysqld.h"
 #include "sql/sql_tmp_table.h"
 #include "sql/opt_range.h"
-
+#include "sql/sql_lex.h"
 
 static const enum_field_types NO_PQ_SUPPORTED_FIELD_TYPES [] = {
   MYSQL_TYPE_TINY_BLOB,
@@ -687,18 +687,7 @@ bool check_pq_select_fields(JOIN *join) {
  */
 bool choose_parallel_scan_table(JOIN *join) {
   QEP_TAB *tab = &join->qep_tab[join->const_tables];
-  // only support table/index full/range scan
-  join_type scan_type= tab->type();
-  if (scan_type != JT_ALL &&
-      scan_type != JT_INDEX_SCAN &&
-      scan_type != JT_REF &&
-      (scan_type != JT_RANGE || !tab->quick() ||
-       tab->quick()->quick_select_type() != PQ_RANGE_SELECT)) {
-    return false;
-  }
-  
   tab->do_parallel_scan = true;
-
   return true;
 }
 
@@ -806,11 +795,25 @@ bool suite_for_parallel_query(JOIN *join) {
     (join->zero_result_cause != nullptr)) {
     return false;
   }
-	
+  QEP_TAB *tab = &join->qep_tab[join->const_tables];
+  // only support table/index full/range scan
+  join_type scan_type= tab->type();
+  if (scan_type != JT_ALL &&
+      scan_type != JT_INDEX_SCAN &&
+      scan_type != JT_REF &&
+      (scan_type != JT_RANGE || !tab->quick() ||
+       tab->quick()->quick_select_type() != PQ_RANGE_SELECT)) {
+    return false;
+  }
   if (!check_pq_select_fields(join)) {
 	  return false;
   }
-
+  //materialized subviews are not supported
+  for (uint i = 0; i < join->tables; i++) {
+    if (join->qep_tab[i].get_sj_strategy() >= SJ_OPT_MATERIALIZE_LOOKUP) {
+      return false;
+    }
+  }
   return true;  
 }
 
@@ -898,10 +901,10 @@ bool check_pq_conditions(THD *thd) {
   if (!suite_for_parallel_query(select->join)) {
     return false;
   }
-  
+
   if (!choose_parallel_scan_table(select->join)) {
     return false;
   }
-  
+
   return true;
 }
