@@ -184,43 +184,75 @@ bool TABLE_REF::pq_copy(JOIN *join, TABLE_REF *ref, QEP_TAB *qep_tab) {
   }
   return false;
 }
-
-bool is_same_table(QEP_TAB *src, const char *db, const char *table_name, const char *table_ref_alias) {
-  if (!strcmp(db, src->db->str) &&
-      !strcmp(table_name, src->table_name->str) &&
-      !strcmp(table_ref_alias, src->table_ref->alias)) {
-    return true;
-  }
-  return false;
-}
-
-int get_table_index(QEP_TAB *src, JOIN *join, uint list_size) {
+/*
+ * get table index
+ *
+ * @retval:
+ *    -1 means not found.
+ */
+int get_table_index(QEP_TAB *src, TABLE_LIST *first_tbl) {
   int index = 0;
-  for (uint i = 0; i < list_size; i++) {
-    QEP_TAB *tab = &join->qep_tab[i];
-    if (tab->table_ref == nullptr) {
-      continue;
+  for (TABLE_LIST *tl = first_tbl; tl != nullptr; tl = tl->next_leaf) {
+    if (src->table_ref == tl) {
+      return index;
     }
-    if (is_same_table(src, tab->db->str, tab->table_name->str, tab->table_ref->alias)) {
-      index++;
-    }
+    index++;
   }
-  return index;
+  return -1;
 }
 
-TABLE_LIST *get_table(QEP_TAB *src, int index, SELECT_LEX *select) {
-  int same_num = 0;
-  for (TABLE_LIST *tl = select->leaf_tables; tl != nullptr; tl = tl->next_leaf) {
-    if (is_same_table(src, tl->db, tl->table_name, tl->alias)) {
-      same_num++;
-      if (same_num - 1 == index) {
-        return tl;
-      }
+TABLE_LIST *get_table(TABLE_LIST *first_tbl, int index) {
+  int i = 0;
+  for (TABLE_LIST *tl = first_tbl; tl != nullptr; tl = tl->next_leaf) {
+    if (i == index) {
+      return tl;
     }
+    i++;
   }
   return nullptr;
 }
 
+int get_qep_tab_index(QEP_TAB *tab, JOIN *join) {
+  for (uint i = 0; i < join->tables; i++) {
+    if (&join->qep_tab0[i] == tab) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+bool copy_flush(QEP_TAB* des, JOIN *orig, int index, JOIN *join) {
+  QEP_TAB *src = &orig->qep_tab[index];
+  SJ_TMP_TABLE_TAB sjtabs[MAX_TABLES];
+  SJ_TMP_TABLE_TAB *last_tab = sjtabs;
+  if (src->flush_weedout_table->tabs != nullptr) {
+    for (SJ_TMP_TABLE_TAB * t = src->flush_weedout_table->tabs;
+        t < src->flush_weedout_table->tabs_end; t++) {
+      int n = get_qep_tab_index(t->qep_tab, orig);
+      if (n == -1) {
+        return false;
+      }
+      last_tab->qep_tab = &join->qep_tab[n];
+      ++last_tab;
+    }
+  }
+
+  SJ_TMP_TABLE *sjtbl = create_sj_tmp_table(join->thd, join, sjtabs, last_tab);
+  des->flush_weedout_table = sjtbl;
+  QEP_TAB *start = &orig->qep_tab[index];
+  int dis = 0;
+  for (uint i = index + 1; i < orig->tables; i++) {
+    QEP_TAB *t = &orig->qep_tab[i];
+    if (t->check_weed_out_table == start->flush_weedout_table) {
+      dis = i - index;
+      break;
+    }
+  }
+
+  QEP_TAB *last_sj_tab = des + dis;
+  last_sj_tab->check_weed_out_table = sjtbl;
+  return true;
+}
 /**
  * duplicate qep_tabs in JOIN
  *
@@ -248,6 +280,8 @@ bool pq_dup_tabs(JOIN *join, JOIN *orig, bool setup MY_ATTRIBUTE((unused))) {
     join->qep_tab[i].set_join(join);
     join->qep_tab[i].set_idx(i);
     join->qep_tab[i].match_tab = orig->qep_tab[i].match_tab;
+    join->qep_tab[i].flush_weedout_table = orig->qep_tab[i].flush_weedout_table;
+    join->qep_tab[i].check_weed_out_table = orig->qep_tab[i].check_weed_out_table;
     join->qep_tab[i].op_type = orig->qep_tab[i].op_type;
     join->qep_tab[i].table_ref = orig->qep_tab[i].table_ref;
     join->qep_tab[i].using_dynamic_range = orig->qep_tab[i].using_dynamic_range;
@@ -280,8 +314,11 @@ bool pq_dup_tabs(JOIN *join, JOIN *orig, bool setup MY_ATTRIBUTE((unused))) {
      * The leaf_tables has two t1's in it,at this point we need to copy the
      * corresponding table of the same name.
      */
-    int index = get_table_index(tab, join, i);
-    TABLE_LIST *tl = get_table(tab, index, select);
+    int index = get_table_index(orig_tab, orig->select_lex->leaf_tables);
+    if (index == -1) {
+      goto err;
+    }
+    TABLE_LIST *tl = get_table(select->leaf_tables, index);
     if (tl == nullptr) {
       goto err;
     }
@@ -361,6 +398,15 @@ bool pq_dup_tabs(JOIN *join, JOIN *orig, bool setup MY_ATTRIBUTE((unused))) {
 
     select->having_fix_field = false;
     select->resolve_place = SELECT_LEX::RESOLVE_NONE;
+  }
+
+  for (uint i = 0; i < join->tables; i++) {
+    QEP_TAB *t = &orig->qep_tab[i];
+    if (t->flush_weedout_table != nullptr) {
+      if (!copy_flush(&join->qep_tab[i], orig, i , join)) {
+        goto err;
+      }
+    }
   }
   return false;
 
