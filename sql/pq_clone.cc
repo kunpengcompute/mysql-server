@@ -419,12 +419,23 @@ err:
  */
 ORDER *pq_dup_order(THD *thd, SELECT_LEX *select, ORDER *orig) {
   ORDER *order = new (thd->pq_mem_root) ORDER();
-  if (!order) return nullptr;
-  order->next = nullptr;
-  order->item_ptr = orig->item_ptr->pq_clone(thd, select);
+  if (order == nullptr) {
+    return nullptr;
+  }
+  
+  if ((*orig->item)->is_derived_used() || !orig->in_field_list) {
+    order->item_ptr = (*orig->item)->pq_clone(thd, select);
+  } else {
+    order->item_ptr = orig->item_ptr->pq_clone(thd, select);
+  }
+
   DBUG_ASSERT(DBUG_EVALUATE_IF("skip_pq_clone_check", true, false) ||
               order->item_ptr);
-  if (!order->item_ptr) return nullptr;
+  if (order->item_ptr == nullptr) {
+    return nullptr;
+  }
+
+  order->next = nullptr;
   order->item = &order->item_ptr;
   order->direction = orig->direction;
   order->in_field_list = orig->in_field_list;
@@ -659,14 +670,14 @@ static bool pq_select_prepare(THD *thd, SELECT_LEX *select, List<Item> &orig_all
     return true;
 
   List_iterator_fast<Item> lm(select->all_fields);
-  uint i= 0;
-  Item *item= nullptr;
-  Item *orig_item= nullptr;
+  Item *item = nullptr;
+  Item *orig_item = nullptr;
 
-  for (i= 0; (item= lm++); i++) {
-    orig_item= orig_all_fields[i];
-    if(!item || (item->type() != orig_item->type()))
+  for (uint i = 0; (item = lm++); i++) {
+    orig_item = orig_all_fields[i];
+    if (item == nullptr || (item->real_item()->type() != orig_item->real_item()->type())) {
       return true;
+    }    
   }
 
   return false;

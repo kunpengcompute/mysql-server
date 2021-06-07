@@ -328,12 +328,7 @@ PQ_CLONE_DEF(Item_default_value) {
 PQ_CLONE_RETURN
 
 Item *Item_view_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
-  Item** item_ref = new (thd->pq_mem_root) Item*();
-  *item_ref = (*ref)->pq_clone(thd, select);
-  Item_view_ref *new_item = new (thd->pq_mem_root)
-      Item_view_ref(&select->context, item_ref, table_name, orig_table_name,
-          field_name, cached_table);
-  return new_item;
+  return (*ref)->pq_clone(thd, select);
 }
 
 Item *Item_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
