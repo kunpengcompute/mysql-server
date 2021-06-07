@@ -4029,12 +4029,19 @@ bool find_order_in_list(THD *thd, Ref_item_array ref_item_array,
     order->is_position = true;
     return false;
   }
-  /* Lookup the current GROUP/ORDER field in the SELECT clause. */
-  select_item = find_item_in_list(thd, order_item, fields, &counter,
-                                  REPORT_EXCEPT_NOT_FOUND, &resolution);
-  if (!select_item)
-    return true; /* The item is not unique, or some other error occurred. */
 
+  if (thd->parallel_exec && !order->in_field_list) {
+    select_item = not_found_item;
+  } else {
+    /* Lookup the current GROUP/ORDER field in the SELECT clause. */
+    select_item = find_item_in_list(thd, order_item, fields, &counter,
+                                  REPORT_EXCEPT_NOT_FOUND, &resolution);
+  }
+  
+  if (select_item == nullptr) {
+    return true; /* The item is not unique, or some other error occurred. */
+  }
+    
   /* Check whether the resolved field is not ambiguos. */
   if (select_item != not_found_item) {
     Item *view_ref = nullptr;
