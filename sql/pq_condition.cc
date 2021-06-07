@@ -808,12 +808,7 @@ bool suite_for_parallel_query(JOIN *join) {
   if (!check_pq_select_fields(join)) {
 	  return false;
   }
-  //materialized subviews are not supported
-  for (uint i = 0; i < join->tables; i++) {
-    if (join->qep_tab[i].get_sj_strategy() >= SJ_OPT_MATERIALIZE_LOOKUP) {
-      return false;
-    }
-  }
+  
   return true;  
 }
 
@@ -866,6 +861,129 @@ static bool check_pq_running_threads(uint dop, ulong timeout_ms) {
   return success;
 }
 
+class PQCheck {
+public:
+    explicit PQCheck(SELECT_LEX *select_lex_arg)
+        : select_lex(select_lex_arg) {}
+
+    virtual ~PQCheck() {}
+
+    virtual bool suite_for_parallel_query();
+
+protected:
+    virtual void set_select_id();
+    virtual void set_select_type();
+
+protected:
+    uint select_id{};
+    enum_explain_type select_type{};
+
+private:
+    SELECT_LEX *select_lex;   
+};
+
+class PlanReadyPQCheck : public PQCheck {
+public:
+    explicit PlanReadyPQCheck(SELECT_LEX *select_lex_arg)
+        : PQCheck(select_lex_arg),
+          join(select_lex_arg->join) {}
+
+    bool suite_for_parallel_query() override;
+
+private:
+    void set_select_id() override;
+    void set_select_type() override;
+
+private:
+    JOIN *join;
+    QEP_TAB *tab{nullptr};
+};
+
+void PQCheck::set_select_id() {
+    select_id = select_lex->select_number;
+}
+
+void PQCheck::set_select_type() {
+    select_type = select_lex->type();
+}
+
+bool PQCheck::suite_for_parallel_query() {
+    set_select_id();
+    set_select_type();
+
+    if (select_id > 1 || select_type != enum_explain_type::EXPLAIN_SIMPLE) {
+        return false;
+    }
+
+    return true;
+}
+
+void PlanReadyPQCheck::set_select_id() {
+    if (tab && sj_is_materialize_strategy(tab->get_sj_strategy())) {
+        select_id = tab->sjm_query_block_id();
+    } else {
+        PQCheck::set_select_id();
+    }
+}
+
+void PlanReadyPQCheck::set_select_type() {
+    if (tab && sj_is_materialize_strategy(tab->get_sj_strategy())) {
+        select_type = enum_explain_type::EXPLAIN_MATERIALIZED;
+    } else {
+        PQCheck::set_select_type();
+    }
+}
+
+bool PlanReadyPQCheck::suite_for_parallel_query() {
+    for (uint t = 0; t < join->tables; t++) {
+        tab = join->qep_tab + t;
+        if (!tab->position()) {
+            continue;
+        }
+
+        if (!PQCheck::suite_for_parallel_query()) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool check_select_id_and_type(SELECT_LEX *select_lex) {
+    JOIN *join = select_lex->join;
+    std::unique_ptr<PQCheck> check;
+    bool ret = false;
+
+    if (join == nullptr) {
+        check.reset(new PQCheck(select_lex));
+        goto END;
+    }
+
+    switch (join->get_plan_state()) {
+        case JOIN::NO_PLAN:
+        case JOIN::ZERO_RESULT:
+        case JOIN::NO_TABLES: {
+            check.reset(new PQCheck(select_lex));
+            break;
+        }
+
+        case JOIN::PLAN_READY: {
+            check.reset(new PlanReadyPQCheck(select_lex));
+            break;
+        }
+
+        default:
+            DBUG_ASSERT(0);
+    }
+
+END:
+    if (check != nullptr) {
+        ret = check->suite_for_parallel_query();
+    }
+
+    return ret;
+}
+
 bool check_pq_conditions(THD *thd) {
   // max PQ memory size limit
   if (get_pq_memory_total() >= parallel_memory_limit) {
@@ -899,6 +1017,10 @@ bool check_pq_conditions(THD *thd) {
   }
   
   if (!suite_for_parallel_query(select->join)) {
+    return false;
+  }
+
+  if (!check_select_id_and_type(select)) {
     return false;
   }
 
