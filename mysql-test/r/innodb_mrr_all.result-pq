@@ -366,8 +366,9 @@ WHERE t2.int_key IS NULL
 GROUP BY t2.pk
 );
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	index	NULL	PRIMARY	4	NULL	1	100.00	Using index
-1	SIMPLE	t2	NULL	ref	int_key	int_key	5	const	1	100.00	Using where; Using index; FirstMatch(t1)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	index	NULL	PRIMARY	4	NULL	1	100.00	Using index
+2	SIMPLE	t2	NULL	ref	int_key	int_key	5	const	1	100.00	Using where; Using index; FirstMatch(t1)
 Warnings:
 Note	1003	/* select#1 */ select min(`test`.`t1`.`pk`) AS `MIN(t1.pk)` from `test`.`t1` semi join (`test`.`t2`) where (`test`.`t2`.`int_key` is null)
 DROP TABLE t1, t2;
