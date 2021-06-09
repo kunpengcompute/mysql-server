@@ -1430,9 +1430,10 @@ FROM (SELECT 1 FROM t1 WHERE a) AS q
 NATURAL LEFT JOIN t1
 NATURAL LEFT JOIN t1 AS t2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
+2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select 1 AS `1` from `test`.`t1` left join `test`.`t1` on(true) left join `test`.`t1` `t2` on((`test`.`t2`.`a` = `test`.`t1`.`a`)) where (0 <> `test`.`t1`.`a`)
 SELECT 1
@@ -1445,9 +1446,10 @@ FROM t1
 NATURAL RIGHT JOIN t1 AS t2
 NATURAL RIGHT JOIN (SELECT 1 FROM t1 WHERE a) AS q;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where
+2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select 1 AS `1` from `test`.`t1` left join (`test`.`t1` `t2` left join `test`.`t1` on((`test`.`t1`.`a` = `test`.`t2`.`a`))) on(true) where (0 <> `test`.`t1`.`a`)
 SELECT 1
@@ -2039,14 +2041,15 @@ from t t2
 left join (select * from t t3 where t3.a>t1.a) dt
 on true);
 EXPLAIN
--> Nested loop inner join  (cost=1.75 rows=4)
-    -> Filter: (t1.a > t1.a)  (cost=0.45 rows=2)
-        -> Table scan on t1  (cost=0.45 rows=2)
-    -> Limit: 1 row(s)  (cost=1.00 rows=2)
-        -> Nested loop inner join  (cost=1.00 rows=2)
-            -> Filter: (t3.a = t1.a)  (cost=0.30 rows=1)
-                -> Table scan on t3  (cost=0.30 rows=2)
-            -> Table scan on t2  (cost=0.70 rows=2)
+-> Parallel scan on <temporary>
+    -> Nested loop inner join  (cost=1.75 rows=4)
+        -> Filter: (t1.a > t1.a)  (cost=0.45 rows=2)
+            -> PQblock scan on t1  (cost=0.45 rows=2)
+        -> Limit: 1 row(s)  (cost=1.00 rows=2)
+            -> Nested loop inner join  (cost=1.00 rows=2)
+                -> Filter: (t3.a = t1.a)  (cost=0.30 rows=1)
+                    -> Table scan on t3  (cost=0.30 rows=2)
+                -> Table scan on t2  (cost=0.70 rows=2)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #3 was resolved in SELECT #1
