@@ -7740,10 +7740,16 @@ Field *find_field_in_tables(THD *thd, Item_ident *item, TABLE_LIST *first_table,
   auto cur_table = first_table;
   for (; cur_table != last_table && cur_table != last_table2;
        cur_table = cur_table->next_name_resolution_table) {
-    Field *cur_field = find_field_in_table_ref(
+    Field *cur_field = nullptr;
+    if (thd->parallel_exec && item->m_tableno != cur_table->m_tableno) {
+      continue;
+    } else {
+      cur_field = find_field_in_table_ref(
         thd, cur_table, name, length, item->item_name.ptr(), db, table_name,
         ref, want_privilege, allow_rowid, &(item->cached_field_index),
         register_tree_change, &actual_table);
+    }
+    
     if ((cur_field == nullptr && thd->is_error()) || cur_field == WRONG_GRANT)
       return nullptr;
 
