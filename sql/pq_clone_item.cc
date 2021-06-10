@@ -304,6 +304,21 @@ PQ_COPY_FROM_DEF(Item_ident, Item) {
     DBUG_EXECUTE_IF("simulate_item_clone_attr_copy_error", return true;);
 
     context = &select->context;
+
+    if (orig_item->cached_table == nullptr) {
+      m_tableno = orig_item->m_tableno;
+    } else {
+      m_tableno = orig_item->cached_table->m_tableno;
+    }
+  }
+PQ_COPY_FROM_RETURN
+
+PQ_COPY_FROM_DEF(Item_field, Item_ident) {
+    DBUG_EXECUTE_IF("simulate_item_field_copy_error", return true;);
+
+    if (orig_item->table_ref != nullptr) {
+      m_tableno = orig_item->table_ref->m_tableno;
+    }
   }
 PQ_COPY_FROM_RETURN
 

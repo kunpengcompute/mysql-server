@@ -3162,13 +3162,14 @@ struct TABLE_LIST {
 
   const Lock_descriptor &lock_descriptor() const { return m_lock_descriptor; }
 
- private:
+ public:
   /**
     The members below must be kept aligned so that (1 << m_tableno) == m_map.
     A table that takes part in a join operation must be assigned a unique
     table number.
   */
   uint m_tableno{0};   ///< Table number within query block
+ private:
   table_map m_map{0};  ///< Table map, derived from m_tableno
   /**
      If this table or join nest is the Y in "X [LEFT] JOIN Y ON C", this
