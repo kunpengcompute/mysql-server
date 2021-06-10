@@ -2674,36 +2674,10 @@ public:
   void enter_cond(mysql_cond_t *cond, mysql_mutex_t *mutex,
                   const PSI_stage_info *stage, PSI_stage_info *old_stage,
                   const char *src_function, const char *src_file,
-                  int src_line) {
-    DBUG_TRACE;
-    mysql_mutex_assert_owner(mutex);
-    /*
-      Sic: We don't lock LOCK_current_cond here.
-      If we did, we could end up in deadlock with THD::awake()
-      which locks current_mutex while LOCK_current_cond is locked.
-    */
-    current_mutex = mutex;
-    current_cond = cond;
-    enter_stage(stage, old_stage, src_function, src_file, src_line);
-    return;
-  }
+                  int src_line);
 
   void exit_cond(const PSI_stage_info *stage, const char *src_function,
-                 const char *src_file, int src_line) {
-    DBUG_TRACE;
-    /*
-      current_mutex must be unlocked _before_ LOCK_current_cond is
-      locked (if that would not be the case, you'll get a deadlock if someone
-      does a THD::awake() on you).
-    */
-    mysql_mutex_assert_not_owner(current_mutex.load());
-    mysql_mutex_lock(&LOCK_current_cond);
-    current_mutex = nullptr;
-    current_cond = nullptr;
-    mysql_mutex_unlock(&LOCK_current_cond);
-    enter_stage(stage, nullptr, src_function, src_file, src_line);
-    return;
-  }
+                 const char *src_file, int src_line);
 
   virtual int is_killed() const final { return killed; }
   virtual THD *get_thd() { return this; }

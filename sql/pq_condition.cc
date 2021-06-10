@@ -31,7 +31,7 @@
 #include "sql/opt_range.h"
 #include "sql/sql_lex.h"
 
-static const enum_field_types NO_PQ_SUPPORTED_FIELD_TYPES [] = {
+const enum_field_types NO_PQ_SUPPORTED_FIELD_TYPES [] = {
   MYSQL_TYPE_TINY_BLOB,
   MYSQL_TYPE_MEDIUM_BLOB,
   MYSQL_TYPE_BLOB,
@@ -40,7 +40,7 @@ static const enum_field_types NO_PQ_SUPPORTED_FIELD_TYPES [] = {
   MYSQL_TYPE_GEOMETRY
 };
 
-static const Item_sum::Sumfunctype NO_PQ_SUPPORTED_AGG_FUNC_TYPES [] = {
+const Item_sum::Sumfunctype NO_PQ_SUPPORTED_AGG_FUNC_TYPES [] = {
   Item_sum::COUNT_DISTINCT_FUNC,
   Item_sum::SUM_DISTINCT_FUNC,
   Item_sum::AVG_DISTINCT_FUNC,
@@ -51,7 +51,7 @@ static const Item_sum::Sumfunctype NO_PQ_SUPPORTED_AGG_FUNC_TYPES [] = {
   Item_sum::VARIANCE_FUNC
 };
 
-static const Item_func::Functype NO_PQ_SUPPORTED_FUNC_TYPES [] = {
+const Item_func::Functype NO_PQ_SUPPORTED_FUNC_TYPES [] = {
   Item_func::MATCH_FUNC,
   Item_func::SUSERVAR_FUNC,
   Item_func::FUNC_SP,
@@ -61,7 +61,7 @@ static const Item_func::Functype NO_PQ_SUPPORTED_FUNC_TYPES [] = {
   Item_func::XML_FUNC
 };
 
-static const char* NO_PQ_SUPPORTED_FUNC_ARGS [] = {
+const char* NO_PQ_SUPPORTED_FUNC_ARGS [] = {
   "rand",
   "json_valid",
   "json_length",
@@ -80,11 +80,11 @@ static const char* NO_PQ_SUPPORTED_FUNC_ARGS [] = {
   "des_decrypt"     // Data truncation
 };
 
-static const char* NO_PQ_SUPPORTED_FUNC_NO_ARGS [] = {
+const char* NO_PQ_SUPPORTED_FUNC_NO_ARGS [] = {
   "release_all_locks"
 };
 
-static const Item_ref::Ref_Type NO_PQ_SUPPORTED_REF_TYPES[] = {
+const Item_ref::Ref_Type NO_PQ_SUPPORTED_REF_TYPES[] = {
     Item_ref::OUTER_REF,
     Item_ref::AGGREGATE_REF
 };
@@ -92,7 +92,7 @@ static const Item_ref::Ref_Type NO_PQ_SUPPORTED_REF_TYPES[] = {
 /**
  * return true when type is a not_supported_field; return false otherwise.
  */
-static bool pq_not_support_datatype(enum_field_types type) {
+bool pq_not_support_datatype(enum_field_types type) {
   for (const enum_field_types &field_type : NO_PQ_SUPPORTED_FIELD_TYPES) {
     if (type == field_type) {
       return true;
@@ -105,7 +105,7 @@ static bool pq_not_support_datatype(enum_field_types type) {
 /**
  * check PQ supported function type
  */
-static bool pq_not_support_functype(Item_func::Functype type) {
+bool pq_not_support_functype(Item_func::Functype type) {
   for (const Item_func::Functype &func_type : NO_PQ_SUPPORTED_FUNC_TYPES) {
     if (type == func_type) {
       return true;
@@ -118,7 +118,7 @@ static bool pq_not_support_functype(Item_func::Functype type) {
 /**
  * check PQ supported function 
  */
-static bool pq_not_support_func(Item_func *func) {
+bool pq_not_support_func(Item_func *func) {
   if (pq_not_support_functype(func->functype())) {
     return true;
   }
@@ -141,7 +141,7 @@ static bool pq_not_support_func(Item_func *func) {
 /**
  * check PQ support aggregation function
  */
-static bool pq_not_support_aggr_functype(Item_sum::Sumfunctype type) {
+bool pq_not_support_aggr_functype(Item_sum::Sumfunctype type) {
   for (const Item_sum::Sumfunctype &sum_func_type : NO_PQ_SUPPORTED_AGG_FUNC_TYPES) {
     if (sum_func_type == type) {
       return true;
@@ -154,7 +154,7 @@ static bool pq_not_support_aggr_functype(Item_sum::Sumfunctype type) {
 /**
  * check PQ supported ref function
  */
-static bool pq_not_support_ref(Item_ref *ref) {
+bool pq_not_support_ref(Item_ref *ref) {
   Item_ref::Ref_Type type = ref->ref_type();
   for (auto &ref_type : NO_PQ_SUPPORTED_REF_TYPES) {
     if (type == ref_type) {
@@ -172,9 +172,9 @@ struct PQ_CHECK_ITEM_TYPE {
   PQ_CHECK_ITEM_FUN fun_ptr;
 };
 
-static bool check_pq_support_fieldtype(Item *item);
+bool check_pq_support_fieldtype(Item *item);
 
-static bool check_pq_support_fieldtype_of_field_item(Item *item) {
+bool check_pq_support_fieldtype_of_field_item(Item *item) {
   Field *field = static_cast<Item_field *>(item)->field;
   DBUG_ASSERT(field);
   // not supported for generated column
@@ -186,7 +186,7 @@ static bool check_pq_support_fieldtype_of_field_item(Item *item) {
   return true;
 }
 
-static bool check_pq_support_fieldtype_of_func_item(Item *item) {
+bool check_pq_support_fieldtype_of_func_item(Item *item) {
   Item_func *func = static_cast<Item_func *>(item);
   DBUG_ASSERT(func);
 
@@ -241,7 +241,7 @@ static bool check_pq_support_fieldtype_of_func_item(Item *item) {
   return true;
 }
 
-static bool check_pq_support_fieldtype_of_cond_item(Item *item) {
+bool check_pq_support_fieldtype_of_cond_item(Item *item) {
   Item_cond *cond = static_cast<Item_cond *>(item);
   DBUG_ASSERT(cond);
 
@@ -261,7 +261,7 @@ static bool check_pq_support_fieldtype_of_cond_item(Item *item) {
   return true;
 }
 
-static bool check_pq_support_fieldtype_of_sum_func_item(Item *item) {
+bool check_pq_support_fieldtype_of_sum_func_item(Item *item) {
   Item_sum *sum = static_cast<Item_sum *>(item);
   if (!sum || pq_not_support_aggr_functype(sum->sum_func())) {
     return false;
@@ -277,7 +277,7 @@ static bool check_pq_support_fieldtype_of_sum_func_item(Item *item) {
   return true;
 }
 
-static bool check_pq_support_fieldtype_of_ref_item(Item *item) {  
+bool check_pq_support_fieldtype_of_ref_item(Item *item) {  
   Item_ref *item_ref = down_cast<Item_ref *>(item);
   if (!item_ref || pq_not_support_ref(item_ref)) {
     return false;
@@ -291,7 +291,7 @@ static bool check_pq_support_fieldtype_of_ref_item(Item *item) {
   return true;
 }
 
-static bool check_pq_support_fieldtype_of_cache_item(Item *item) {
+bool check_pq_support_fieldtype_of_cache_item(Item *item) {
   Item_cache *item_cache = dynamic_cast<Item_cache*>(item);
   if (item_cache == nullptr) {
     return false;
@@ -306,7 +306,7 @@ static bool check_pq_support_fieldtype_of_cache_item(Item *item) {
   return true;
 }
 
-static bool check_pq_support_fieldtype_of_row_item(Item *item) {
+bool check_pq_support_fieldtype_of_row_item(Item *item) {
   // check each item in Item_row
   Item_row *row_item = down_cast<Item_row *>(item);
   for (uint i = 0; i < row_item->cols(); i++) {
@@ -320,7 +320,7 @@ static bool check_pq_support_fieldtype_of_row_item(Item *item) {
   return true;
 }
 
-static PQ_CHECK_ITEM_TYPE g_check_item_type[] = {
+PQ_CHECK_ITEM_TYPE g_check_item_type[] = {
   {Item::INVALID_ITEM, nullptr},
   {Item::FIELD_ITEM, check_pq_support_fieldtype_of_field_item},
   {Item::FUNC_ITEM, check_pq_support_fieldtype_of_func_item},
@@ -361,7 +361,7 @@ static PQ_CHECK_ITEM_TYPE g_check_item_type[] = {
  *     true : supported
  *     false : not supported
  */
-static bool check_pq_support_fieldtype(Item *item) {
+bool check_pq_support_fieldtype(Item *item) {
   if (item == nullptr || pq_not_support_datatype(item->data_type())) {
     return false;
   }
@@ -380,7 +380,7 @@ static bool check_pq_support_fieldtype(Item *item) {
  *    true: contained
  *    false:
  */
-static bool check_pq_sort_aggregation(const ORDER_with_src &order_list) {
+bool check_pq_sort_aggregation(const ORDER_with_src &order_list) {
   if (!order_list.order) {
     return false;
   }
@@ -812,7 +812,7 @@ bool suite_for_parallel_query(JOIN *join) {
   return true;  
 }
 
-static bool check_pq_running_threads(uint dop, ulong timeout_ms) {
+bool check_pq_running_threads(uint dop, ulong timeout_ms) {
   bool success = false;
   mysql_mutex_lock(&LOCK_pq_threads_running);
   if (parallel_threads_running + dop > parallel_max_threads) {
