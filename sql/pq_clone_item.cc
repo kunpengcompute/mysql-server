@@ -342,9 +342,153 @@ PQ_CLONE_DEF(Item_default_value) {
   }
 PQ_CLONE_RETURN
 
-Item *Item_view_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
-  return (*ref)->pq_clone(thd, select);
+int find_ref_in_table(TABLE_LIST *tl,Item **ref) {
+  int count = tl->field_translation_end - tl->field_translation;
+  if (count > 0) {
+    for (int i = 0; i < count; i++) {
+      if (*ref ==  tl->field_translation[i].item) {
+        return i;  
+      }      
+    }  
+  }
+  return -1;
 }
+
+bool find_ref_in_mergelist(Item **ref, class SELECT_LEX *select, Item *** des) {
+  int tableindex = 0;
+  int mergeindex = 0;
+  int fieldindex = 0;
+  bool found = false;
+  for (TABLE_LIST *tl = select->orig->table_list.first; tl != nullptr; tl = tl->next_local) {
+    if (tl->merge_underlying_list != nullptr) {
+      mergeindex = 0;
+      for (TABLE_LIST *tb = tl->merge_underlying_list; tb != nullptr; tb = tb->merge_underlying_list) {
+        if (tb->field_translation != nullptr) {
+          int count = tb->field_translation_end - tb->field_translation;
+          fieldindex = 0;
+          for (int i = 0; i < count; i++) {
+            if (*ref == tb->field_translation[i].item) {
+              found = true;
+              break;
+            }
+            fieldindex++;
+          }
+          if (found) {
+            break;
+          }
+        }
+        mergeindex++;
+      }
+      if (found) {
+        break;
+      }
+    }
+    tableindex++;
+  }
+  if (!found) {
+    return false;
+  }
+  TABLE_LIST *tb = get_table_by_index(select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
+  TABLE_LIST *mergetb = get_table_by_index(tb, TABLE_LIST_TYPE_MERGE, mergeindex);
+  *des = &mergetb->field_translation[fieldindex].item;
+  return true;
+}
+
+bool get_ref_in_table_list(Item **ref, class SELECT_LEX *select, Item *** des, table_list_type_enum list_type) {
+  bool found = false;
+  int tableindex = 0;
+  int fieldindex = 0;
+  TABLE_LIST *start = nullptr;
+  if (list_type == TABLE_LIST_TYPE_DEFAULT) {
+    start = select->orig->table_list.first;
+  } else {
+    start = select->orig->leaf_tables;
+  }
+  for (TABLE_LIST *tl = start; tl != nullptr;) {
+    int i = find_ref_in_table(tl, ref);
+    if (i != -1) {
+      fieldindex = i;
+      found = true;
+      break;
+    }
+    tableindex++;
+    if (list_type == TABLE_LIST_TYPE_GLOBAL) {
+      tl = tl->next_global;
+    } else {
+      tl = tl->next_local;
+    }
+  }
+  if (!found) {
+    return false;
+  }
+  if (list_type == TABLE_LIST_TYPE_DEFAULT) {
+    start = select->table_list.first;
+  } else {
+    start = select->leaf_tables;
+  }
+  TABLE_LIST *tb = get_table_by_index(start, list_type, tableindex);
+  *des = &tb->field_translation[fieldindex].item;
+  return true;
+}
+TABLE_LIST *get_table_in_tablelist(TABLE_LIST * start, TABLE_LIST *tb) {
+  for (TABLE_LIST *tbl_list = start; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    const char *db = tbl_list->db;
+    const char *table_name = tbl_list->table_name;
+    const char *alias = tbl_list->alias;
+    if (!strncmp(db, tb->db, strlen(db)) && strlen(tb->db) == strlen(db) &&
+        !strncmp(table_name, tb->table_name, strlen(table_name)) && strlen(tb->table_name) == strlen(table_name) &&
+        !strncmp(alias, tb->alias, strlen(alias)) && strlen(tb->alias) == strlen(alias)) {
+      return tbl_list;
+    }
+  }
+  return nullptr;
+}
+
+TABLE_LIST *get_table_in_merge_tablelist(TABLE_LIST * start, TABLE_LIST *tb) {
+  for (TABLE_LIST *tbl_list = start; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    if (tbl_list->merge_underlying_list != nullptr) {
+      for (TABLE_LIST *tl = tbl_list->merge_underlying_list; tl != nullptr; tl = tl->merge_underlying_list) {
+        const char *db = tl->db;
+        const char *table_name = tl->table_name;
+        const char *alias = tl->alias;
+        if (!strncmp(db, tb->db, strlen(db)) && strlen(tb->db) == strlen(db) &&
+            !strncmp(table_name, tb->table_name, strlen(table_name)) && strlen(tb->table_name) == strlen(table_name) &&
+            !strncmp(alias, tb->alias, strlen(alias)) && strlen(tb->alias) == strlen(alias)) {
+          return tl;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+Item *Item_view_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
+  Item ** p = nullptr;
+  bool found = false;
+  found = get_ref_in_table_list(ref, select, &p, TABLE_LIST_TYPE_DEFAULT);
+  if (!found) {
+    found = find_ref_in_mergelist(ref, select, &p);
+  }
+  if (!found) {
+    found = get_ref_in_table_list(ref, select, &p, TABLE_LIST_TYPE_GLOBAL);
+  }
+
+  TABLE_LIST * foundtable = get_table_in_tablelist(select->table_list.first, cached_table);
+  if (foundtable == nullptr) {
+    foundtable = get_table_in_tablelist(select->leaf_tables, cached_table);
+  }
+  if (foundtable == nullptr) {
+    foundtable = get_table_in_merge_tablelist(select->table_list.first, cached_table);
+  }
+  if (foundtable == nullptr) {
+    return nullptr;
+  }
+  Item_view_ref *item = new (thd->pq_mem_root) Item_view_ref(&select->context, p, table_name, orig_table_name,
+                                 field_name, foundtable);
+  item->item_name.set(item_name.ptr());
+  return item;
+}
+
 
 Item *Item_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
   /*
