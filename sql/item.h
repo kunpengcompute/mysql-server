@@ -3408,6 +3408,7 @@ class Item_ident : public Item {
           cached_table should be replaced by table_ref ASAP.
   */
   TABLE_LIST *cached_table;
+  uint m_tableno{0};
   SELECT_LEX *depended_from;
 
   Item_ident(Name_resolution_context *context_arg, const char *db_name_arg,
@@ -3692,6 +3693,7 @@ class Item_field : public Item_ident {
   bool itemize(Parse_context *pc, Item **res) override;
 
   Item *pq_clone(THD *thd, SELECT_LEX *select) override;
+  bool pq_copy_from(THD *thd, SELECT_LEX *select, Item *item) override;
   enum Type type() const override { return FIELD_ITEM; }
   bool eq(const Item *item, bool binary_cmp) const override;
   double val_real() override;
