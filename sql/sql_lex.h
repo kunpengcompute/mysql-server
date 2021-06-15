@@ -1002,6 +1002,7 @@ enum class enum_explain_type {
 */
 class SELECT_LEX {
  public:
+  SELECT_LEX *orig;
   Item *where_cond() const { return m_where_cond; }
   Item **where_cond_ref() { return &m_where_cond; }
   void set_where_cond(Item *cond) { m_where_cond = cond; }
