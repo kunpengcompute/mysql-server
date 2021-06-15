@@ -3351,10 +3351,9 @@ struct TABLE_LIST {
   ulonglong algorithm{0};
   ulonglong view_suid{0};   ///< view is suid (true by default)
   ulonglong with_check{0};  ///< WITH CHECK OPTION
-
+  enum_view_algorithm effective_algorithm{VIEW_ALGORITHM_UNDEFINED};
  private:
   /// The view algorithm that is actually used, if this is a view.
-  enum_view_algorithm effective_algorithm{VIEW_ALGORITHM_UNDEFINED};
   Lock_descriptor m_lock_descriptor;
 
  public:
