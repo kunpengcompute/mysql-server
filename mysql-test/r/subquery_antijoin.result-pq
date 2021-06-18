@@ -41,8 +41,9 @@ a
 EXPLAIN SELECT 1 as a FROM t2 as ot
 WHERE NOT EXISTS (SELECT * FROM t1 AS it);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	ot	NULL	index	NULL	PRIMARY	4	NULL	80	100.00	Using index
-1	SIMPLE	it	NULL	index	NULL	ukn	4	NULL	3	100.00	Using where; Not exists; Using index; Using join buffer (hash join)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	80	100.00	Parallel execute (1 workers)
+2	SIMPLE	ot	NULL	index	NULL	PRIMARY	4	NULL	80	100.00	Using index
+2	SIMPLE	it	NULL	index	NULL	ukn	4	NULL	3	100.00	Using where; Not exists; Using index; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select 1 AS `a` from `test`.`t2` `ot` anti join (`test`.`t1` `it`) on((1 = 1)) where true
 SELECT 1 as a FROM t2 as ot
@@ -52,8 +53,9 @@ EXPLAIN SELECT pk FROM t2 as ot
 WHERE NOT EXISTS (SELECT * FROM t1 AS it WHERE it.uk=ot.pk)
 AND ot.pk<25;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	ot	NULL	range	PRIMARY	PRIMARY	4	NULL	24	100.00	Using where; Using index
-1	SIMPLE	it	NULL	eq_ref	uk	uk	5	test.ot.pk	1	100.00	Using where; Not exists; Using index
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	24	100.00	Parallel execute (1 workers)
+2	SIMPLE	ot	NULL	range	PRIMARY	PRIMARY	4	NULL	24	100.00	Using where; Using index
+2	SIMPLE	it	NULL	eq_ref	uk	uk	5	test.ot.pk	1	100.00	Using where; Not exists; Using index
 Warnings:
 Note	1276	Field or reference 'test.ot.pk' of SELECT #2 was resolved in SELECT #1
 Note	1003	/* select#1 */ select `test`.`ot`.`pk` AS `pk` from `test`.`t2` `ot` anti join (`test`.`t1` `it`) on((`test`.`it`.`uk` = `test`.`ot`.`pk`)) where (`test`.`ot`.`pk` < 25)
@@ -67,68 +69,92 @@ EXPLAIN
     "cost: #
       "query_cost: #
     },
-    "nested_loop": [
-      {
-        "table": {
-          "table_name": "ot",
-          "access_type": "range",
-          "possible_keys": [
-            "PRIMARY"
-          ],
-          "key": "PRIMARY",
-          "used_key_parts": [
-            "pk"
-          ],
-          "key_length": "4",
-          "rows_examined_per_scan": 24,
-          "rows_produced_per_join": 24,
-          "filtered": "100.00",
-          "using_index": true,
-          "cost: #
-            "read_cost: #
-            "eval_cost: #
-            "prefix_cost: #
-            "data_read_per_join": "192"
-          },
-          "used_columns": [
-            "pk"
-          ],
-          "attached_condition": "(`test`.`ot`.`pk` < 25)"
-        }
+    "table": {
+      "table_name": "<gather2>",
+      "access_type": "ALL",
+      "rows_examined_per_scan": 24,
+      "rows_produced_per_join": 24,
+      "filtered": "100.00",
+      "parallel_execute": "1 workers",
+      "cost: #
+        "read_cost: #
+        "eval_cost: #
+        "prefix_cost: #
+        "data_read_per_join": "384"
       },
-      {
-        "table": {
-          "table_name": "it",
-          "access_type": "eq_ref",
-          "possible_keys": [
-            "uk"
-          ],
-          "key": "uk",
-          "used_key_parts": [
-            "uk"
-          ],
-          "key_length": "5",
-          "ref": [
-            "test.ot.pk"
-          ],
-          "rows_examined_per_scan": 1,
-          "rows_produced_per_join": 24,
-          "filtered": "100.00",
-          "not_exists": true,
-          "using_index": true,
-          "cost: #
-            "read_cost: #
-            "eval_cost: #
-            "prefix_cost: #
-            "data_read_per_join": "576"
+      "used_columns": [
+        "pk"
+      ],
+      "query_block": {
+        "cost: #
+          "query_cost: #
+        },
+        "nested_loop": [
+          {
+            "table": {
+              "select_id": 2,
+              "table_name": "ot",
+              "access_type": "range",
+              "possible_keys": [
+                "PRIMARY"
+              ],
+              "key": "PRIMARY",
+              "used_key_parts": [
+                "pk"
+              ],
+              "key_length": "4",
+              "rows_examined_per_scan": 24,
+              "rows_produced_per_join": 24,
+              "filtered": "100.00",
+              "using_index": true,
+              "cost: #
+                "read_cost: #
+                "eval_cost: #
+                "prefix_cost: #
+                "data_read_per_join": "192"
+              },
+              "used_columns": [
+                "pk"
+              ],
+              "attached_condition": "(`test`.`ot`.`pk` < 25)"
+            }
           },
-          "used_columns": [
-            "uk"
-          ],
-          "attached_condition": "<if>(is_not_null_compl(it), <if>(found_match(it), false, true), true)"
-        }
+          {
+            "table": {
+              "select_id": 2,
+              "table_name": "it",
+              "access_type": "eq_ref",
+              "possible_keys": [
+                "uk"
+              ],
+              "key": "uk",
+              "used_key_parts": [
+                "uk"
+              ],
+              "key_length": "5",
+              "ref": [
+                "test.ot.pk"
+              ],
+              "rows_examined_per_scan": 1,
+              "rows_produced_per_join": 24,
+              "filtered": "100.00",
+              "not_exists": true,
+              "using_index": true,
+              "cost: #
+                "read_cost: #
+                "eval_cost: #
+                "prefix_cost: #
+                "data_read_per_join": "576"
+              },
+              "used_columns": [
+                "uk"
+              ],
+              "attached_condition": "<if>(is_not_null_compl(it), <if>(found_match(it), false, true), true)"
+            }
+          }
+        ]
       }
-    ]
+    }
   }
 }
 Warnings:
@@ -945,7 +971,8 @@ Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 EXPLAIN SELECT ID FROM t1 WHERE id IN ( SELECT 1 );
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	20.00	Using where
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	5	20.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	20.00	Using where
 Warnings:
 Note	1249	Select 2 was reduced during optimization
 Note	1003	/* select#1 */ select `test`.`t1`.`id` AS `ID` from `test`.`t1` where (`test`.`t1`.`id` = 1)
@@ -954,7 +981,8 @@ ID
 1
 EXPLAIN SELECT ID FROM t1 WHERE id NOT IN ( SELECT 1 );
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	80.00	Using where
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	5	80.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	80.00	Using where
 Warnings:
 Note	1249	Select 2 was reduced during optimization
 Note	1003	/* select#1 */ select `test`.`t1`.`id` AS `ID` from `test`.`t1` where (not((`test`.`t1`.`id` = 1)))
@@ -966,7 +994,8 @@ ID
 5
 EXPLAIN SELECT id, id IN (SELECT NULL) IS TRUE AS test FROM t1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	100.00	NULL
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	5	100.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	100.00	NULL
 Warnings:
 Note	1249	Select 2 was reduced during optimization
 Note	1003	/* select#1 */ select `test`.`t1`.`id` AS `id`,((`test`.`t1`.`id` = NULL) is true) AS `test` from `test`.`t1`
@@ -1010,8 +1039,9 @@ alias1.col_datetime_key AS field3
 FROM t1 AS alias1 LEFT JOIN t1 AS alias2
 ON NOT EXISTS ( SELECT * FROM t1 AS alias3 WHERE ( SELECT 1 FROM DUAL ) IS NULL );
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	alias1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	alias2	NULL	index	NULL	idx_C_col_varchar_key	6	NULL	2	100.00	Using where; Using index; Using join buffer (hash join)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Parallel execute (1 workers)
+2	SIMPLE	alias1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+2	SIMPLE	alias2	NULL	index	NULL	idx_C_col_varchar_key	6	NULL	2	100.00	Using where; Using index; Using join buffer (hash join)
 Warnings:
 Note	1249	Select 3 was reduced during optimization
 Note	1003	/* select#1 */ select `test`.`alias1`.`col_int` AS `field1`,`test`.`alias2`.`col_varchar_key` AS `field2`,`test`.`alias1`.`col_datetime_key` AS `field3` from `test`.`t1` `alias1` left join `test`.`t1` `alias2` on(true) where true
@@ -1042,11 +1072,12 @@ EXPLAIN
       "query_cost": "0.35"
     },
     "table": {
-      "table_name": "t1",
+      "table_name": "<gather2>",
       "access_type": "ALL",
       "rows_examined_per_scan": 1,
       "rows_produced_per_join": 1,
       "filtered": "100.00",
+      "parallel_execute": "1 workers",
       "cost_info": {
         "read_cost": "0.25",
         "eval_cost": "0.10",
@@ -1054,9 +1085,31 @@ EXPLAIN
         "data_read_per_join": "16"
       },
       "used_columns": [
-        "c1",
-        "c2"
-      ]
+        "c1"
+      ],
+      "query_block": {
+        "cost_info": {
+          "query_cost": "0.35"
+        },
+        "table": {
+          "select_id": 2,
+          "table_name": "t1",
+          "access_type": "ALL",
+          "rows_examined_per_scan": 1,
+          "rows_produced_per_join": 1,
+          "filtered": "100.00",
+          "cost_info": {
+            "read_cost": "0.25",
+            "eval_cost": "0.10",
+            "prefix_cost": "0.35",
+            "data_read_per_join": "16"
+          },
+          "used_columns": [
+            "c1",
+            "c2"
+          ]
+        }
+      }
     }
   }
 }
@@ -1073,8 +1126,9 @@ INSERT INTO t1 VALUES(1),(2);
 INSERT INTO t2 VALUES(2),(3);
 explain SELECT MAX(t1.a) FROM t1 WHERE a NOT IN (SELECT a FROM t2);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	index	NULL	a	4	NULL	2	100.00	Using index
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; Not exists; Using join buffer (hash join)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Parallel execute (1 workers)
+2	SIMPLE	t1	NULL	index	NULL	a	4	NULL	2	100.00	Using index
+2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; Not exists; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select max(`test`.`t1`.`a`) AS `MAX(t1.a)` from `test`.`t1` anti join (`test`.`t2`) on((`test`.`t2`.`a` = `test`.`t1`.`a`)) where true
 SELECT MAX(t1.a) FROM t1 WHERE a NOT IN (SELECT a FROM t2);
