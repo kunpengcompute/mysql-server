@@ -190,7 +190,7 @@ bool TABLE_REF::pq_copy(JOIN *join, TABLE_REF *ref, QEP_TAB *qep_tab) {
  * @retval:
  *    -1 means not found.
  */
-int get_table_index(QEP_TAB *src, TABLE_LIST *first_tbl) {
+int get_qep_tab_index(QEP_TAB *src, TABLE_LIST *first_tbl) {
   int index = 0;
   for (TABLE_LIST *tl = first_tbl; tl != nullptr; tl = tl->next_leaf) {
     if (src->table_ref == tl) {
@@ -201,13 +201,32 @@ int get_table_index(QEP_TAB *src, TABLE_LIST *first_tbl) {
   return -1;
 }
 
-TABLE_LIST *get_table(TABLE_LIST *first_tbl, int index) {
-  int i = 0;
-  for (TABLE_LIST *tl = first_tbl; tl != nullptr; tl = tl->next_leaf) {
-    if (i == index) {
-      return tl;
+
+TABLE_LIST *get_next_table(TABLE_LIST *start_table, table_list_type_enum list_type) {
+  if (list_type == TABLE_LIST_TYPE_DEFAULT) {
+    return start_table->next_local;
+  } else if (list_type == TABLE_LIST_TYPE_LEAF) {
+    return start_table->next_leaf;
+  } else if (list_type == TABLE_LIST_TYPE_MERGE) {
+    return start_table->merge_underlying_list;
+  } else {
+    return start_table->next_global;
+  }
+  return nullptr;
+}
+TABLE_LIST *get_table_by_index(TABLE_LIST* start_table, table_list_type_enum list_type, int index) {
+  if (start_table == nullptr) {
+    return nullptr;
+  }
+  if (list_type == TABLE_LIST_TYPE_MERGE) {
+    start_table =  start_table->merge_underlying_list;
+  }
+  int it = 0;
+  for (TABLE_LIST *tbl_list = start_table; tbl_list != nullptr; it++) {
+    if (it == index) {
+      return tbl_list;
     }
-    i++;
+    tbl_list = get_next_table(tbl_list, list_type);
   }
   return nullptr;
 }
@@ -314,11 +333,11 @@ bool pq_dup_tabs(JOIN *join, JOIN *orig, bool setup MY_ATTRIBUTE((unused))) {
      * The leaf_tables has two t1's in it,at this point we need to copy the
      * corresponding table of the same name.
      */
-    int index = get_table_index(orig_tab, orig->select_lex->leaf_tables);
+    int index = get_qep_tab_index(orig_tab, orig->select_lex->leaf_tables);
     if (index == -1) {
       goto err;
     }
-    TABLE_LIST *tl = get_table(select->leaf_tables, index);
+    TABLE_LIST *tl = get_table_by_index(select->leaf_tables,TABLE_LIST_TYPE_LEAF, index);
     if (tl == nullptr) {
       goto err;
     }
@@ -450,6 +469,327 @@ ORDER *pq_dup_order(THD *thd, SELECT_LEX *select, ORDER *orig) {
   return order;
 }
 
+int get_table_index(TABLE_LIST* start_table, table_list_type_enum list_type, TABLE_LIST *tl) {
+  if (start_table == nullptr) {
+    return -1;
+  }
+  int index = 0;
+  for (TABLE_LIST *tbl_list = start_table; tbl_list != nullptr; index++) {
+    if (tbl_list == tl) {
+      return index;
+    }
+    tbl_list = get_next_table(tbl_list, list_type);
+  }
+  return -1;
+}
+TABLE_LIST *copy_table(THD *thd, TABLE_LIST *src, SELECT_LEX *select, SELECT_LEX *orig) {
+  TABLE_LIST *ptr = new (thd->mem_root) TABLE_LIST;
+  if (ptr == nullptr) {
+    return nullptr;
+  }
+  ptr->select_lex = select;
+  ptr->derived = src->derived;
+  ptr->effective_algorithm = src->effective_algorithm;
+  ptr->outer_join = src->outer_join;
+  if (src->merge_underlying_list != nullptr) {
+    TABLE_LIST * foundtable = nullptr;
+    int index = get_table_index(orig->leaf_tables, TABLE_LIST_TYPE_GLOBAL, src->merge_underlying_list);
+    if (index != -1) {
+      foundtable = get_table_by_index(select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, index);
+      if (foundtable == nullptr) {
+        return nullptr;
+      }
+      ptr->merge_underlying_list = foundtable;
+    } else {
+      ptr->merge_underlying_list = copy_table(thd, src->merge_underlying_list, select, orig);
+    }
+  }
+  ptr->field_translation = nullptr;
+  ptr->table_name = src->table_name;
+  ptr->table_name_length = src->table_name_length;
+  ptr->alias = src->alias;
+  ptr->is_alias = src->is_alias;
+  ptr->table_function = src->table_function;
+  if (src->table_function) {
+    ptr->derived_key_list.empty(); 
+  }
+  ptr->is_fqtn = src->is_fqtn;
+  ptr->db = src->db;
+  ptr->db_length = src->db_length;
+  ptr->set_tableno(src->tableno());
+  ptr->set_lock({TL_UNLOCK, THR_DEFAULT});
+  ptr->updating = false;
+  ptr->force_index = false;
+  ptr->ignore_leaves = false;
+  ptr->is_system_view = src->is_system_view;
+
+  if (!ptr->is_derived() && !ptr->is_table_function() &&
+      is_infoschema_db(ptr->db, ptr->db_length)) {
+    dd::info_schema::convert_table_name_case(
+        const_cast<char *>(ptr->db), const_cast<char *>(ptr->table_name));
+    ST_SCHEMA_TABLE *schema_table;
+    if (!ptr->is_system_view) {
+      schema_table = find_schema_table(thd, ptr->table_name);
+      if (schema_table) {
+        ptr->schema_table_name = ptr->table_name;
+        ptr->schema_table = schema_table;
+      }
+    }
+  }
+  ptr->cacheable_table = true;
+  ptr->index_hints = nullptr;
+  ptr->option = nullptr;
+  ptr->next_name_resolution_table = nullptr;
+  ptr->partition_names = nullptr;
+  MDL_REQUEST_INIT(&ptr->mdl_request, MDL_key::TABLE, ptr->db,
+                    ptr->table_name, MDL_SHARED_READ, MDL_TRANSACTION);
+  return ptr;                
+}
+
+bool copy_table_field( TABLE_LIST * src, TABLE_LIST * des, THD *thd, SELECT_LEX *des_select) {
+  int count = src->field_translation_end - src->field_translation;
+  if (count <= 0) {
+    return false;
+  }
+  if (des->field_translation_end - des->field_translation != count) {
+    return true;
+  }
+  if (des->field_translation[0].item != nullptr) {
+    return false;
+  }
+  for (int i = 0; i < count; i++) {
+    des->field_translation[i].name = src->field_translation[i].name;
+    if (src->field_translation[i].item == nullptr) {
+      return true;
+    }
+    des->field_translation[i].item = src->field_translation[i].item->pq_clone(thd, des_select);
+    if (des->field_translation[i].item == nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool copy_merge_table_field(THD *thd, SELECT_LEX *des_select, int tableindex, int mergeindex, TABLE_LIST *srctb) {
+  TABLE_LIST * tb =  get_table_by_index(des_select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
+  if (tb == nullptr) {
+    return true;
+  }
+  TABLE_LIST *mergetable =  get_table_by_index(tb, TABLE_LIST_TYPE_MERGE, mergeindex);
+  if (mergetable == nullptr) {
+    return true;
+  }
+  if (copy_table_field(srctb, mergetable, thd, des_select)) {
+    return true;
+  }
+  return false;
+}
+
+bool copy_global_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  int tableindex = 0;
+  for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_global) {
+    if (tbl_list->field_translation != nullptr) {
+      TABLE_LIST * src = get_table_by_index(des_select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, tableindex);
+      if (src == nullptr) {
+        return true;
+      }
+      if (copy_table_field(tbl_list,src, thd, des_select)) {
+        return true;
+      }
+    }
+    tableindex++;
+  }
+  return false;
+}
+
+bool init_table_field_space(THD *thd, TABLE_LIST *src, TABLE_LIST *des) {
+  int count = src->field_translation_end - src->field_translation;
+  if (count > 0 && des->field_translation == nullptr) {
+    Field_translator *transl = (Field_translator *)thd->stmt_arena->alloc(
+              count * sizeof(Field_translator));
+    if (transl == nullptr) {
+      return true;
+    }
+    for (int i = 0; i < count; i++) {
+      transl[i].name = nullptr;
+      transl[i].item = nullptr;
+    }
+    des->field_translation = transl;
+    des->field_translation_end = transl + count;
+  }
+  return false;
+}
+
+bool copy_leaf_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  TABLE_LIST *last = nullptr;
+  for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_leaf) {
+    TABLE_LIST *tl = copy_table(thd, tbl_list, des_select, orig);
+    if (tl == nullptr) {
+      return true;
+    }
+    if (des_select->leaf_tables == nullptr) {
+      des_select->leaf_tables = tl;
+      last = tl;
+    } else {
+      last->next_name_resolution_table = tl; 
+      last->next_leaf = tl;
+      last = tl;
+    }
+  }
+  last->next_leaf = nullptr;
+  return false;
+}
+void set_up_leaf_tables(THD *thd, SELECT_LEX *select) {
+  select->partitioned_table_count = 0;
+  for (TABLE_LIST *tr = select->leaf_tables; tr != nullptr; tr = tr->next_leaf) {
+    TABLE *const table = tr->table;
+    select->leaf_table_count++;
+    if (select->first_execution && select->opt_hints_qb &&  // QB hints initialized
+        !tr->opt_hints_table)               // Table hints are not adjusted yet
+    {
+      tr->opt_hints_table = select->opt_hints_qb->adjust_table_hints(tr);
+    }
+    if (table == nullptr) continue;
+    table->pos_in_table_list = tr;
+  }
+  if (select->opt_hints_qb) select->opt_hints_qb->check_unresolved(thd);
+}
+bool copy_global_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_global) {
+    int  index = get_table_index(orig->leaf_tables, TABLE_LIST_TYPE_LEAF, tbl_list);
+    TABLE_LIST *tmp = nullptr;
+    if (index != -1) {
+      tmp = get_table_by_index(des_select->leaf_tables, TABLE_LIST_TYPE_LEAF, index);
+    } else {
+      tmp = copy_table(thd, tbl_list, des_select, orig);
+    }
+    if (tmp == nullptr) {
+      return true;
+    }
+    thd->lex->add_to_query_tables(tmp);
+  }
+  return false;
+}
+bool copy_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    int index = get_table_index(orig->leaf_tables, TABLE_LIST_TYPE_GLOBAL, tbl_list);
+    TABLE_LIST * tmp = nullptr;
+    if (index != -1) {
+      tmp = get_table_by_index(des_select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, index);
+    } else {
+      tmp = copy_table(thd, tbl_list, des_select, orig);
+    }
+    if (tmp == nullptr) {
+      return true;
+    }
+    des_select->table_list.link_in_list(tmp, &tmp->next_local);
+  }
+  return false;
+}
+bool init_table_list_field_space(THD *thd, SELECT_LEX *select, table_list_type_enum list_type) {
+  TABLE_LIST* start_src = nullptr;
+  TABLE_LIST* start_des = nullptr;
+  if (list_type == TABLE_LIST_TYPE_DEFAULT) {
+    start_src = select->orig->table_list.first;
+    start_des = select->table_list.first;
+  } else {
+    start_src = select->orig->leaf_tables;
+    start_des = select->leaf_tables;
+  }
+  int tableindex = 0;
+  for (TABLE_LIST *tbl_list = start_src; tbl_list != nullptr; tableindex++) {
+    if (tbl_list->field_translation != nullptr) {
+      TABLE_LIST *des =  get_table_by_index(start_des, list_type, tableindex);
+      if (des == nullptr) {
+        return true;
+      }
+      if (init_table_field_space(thd, tbl_list, des)) {
+        return true;
+      }
+    }
+    tbl_list = get_next_table(tbl_list, list_type);
+  }
+  return false;
+}
+bool init_field_space(THD *thd, SELECT_LEX *orig, SELECT_LEX *select) {
+  if (init_table_list_field_space(thd, select, TABLE_LIST_TYPE_DEFAULT) ||
+      init_table_list_field_space(thd, select, TABLE_LIST_TYPE_GLOBAL)) {
+    return true;
+  }
+
+  int tableindex = 0;
+  for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    if (tbl_list->merge_underlying_list != nullptr) {
+      int mergeindex = 0;
+      for (TABLE_LIST *tb = tbl_list->merge_underlying_list; tb != nullptr; tb = tb->merge_underlying_list) {
+        if (tb->field_translation != nullptr) {
+          TABLE_LIST * ta = get_table_by_index(select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
+          if (ta == nullptr) {
+            return true;
+          }
+          TABLE_LIST * mergetable = get_table_by_index(ta, TABLE_LIST_TYPE_MERGE , mergeindex);
+          if (mergetable == nullptr) {
+            return true;
+          }
+          if (init_table_field_space(thd, tb, mergetable)) {
+            return true;
+          }
+        }
+        mergeindex++;
+      }
+    }
+    tableindex++;
+  }
+  return false;
+}
+bool copy_merge_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  int tableindex = 0;
+  int mergeindex = 0;
+  for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    if (tbl_list->merge_underlying_list != nullptr) {
+      mergeindex = 0;
+      for (TABLE_LIST *tb = tbl_list->merge_underlying_list; tb != nullptr; tb = tb->merge_underlying_list) {
+        if (tb->field_translation != nullptr &&
+            copy_merge_table_field(thd, des_select, tableindex, mergeindex, tb)) {
+          return true;
+        }
+        mergeindex++;  
+      }
+    }
+    tableindex++;
+  }
+  return false;
+}
+bool copy_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  int tableindex = 0;
+  for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    if (tbl_list->field_translation != nullptr) {
+      TABLE_LIST * src = get_table_by_index(des_select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
+      if (src == nullptr) {
+        return true;
+      }
+      if (copy_table_field(tbl_list, src, thd, des_select)) {
+        return true;
+      }
+    }
+    tableindex++;
+  }
+  return false;
+}
+bool copy_all_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+  if (copy_leaf_tables(thd, orig, des_select) ||
+      copy_global_tables(thd, orig, des_select) ||
+      copy_table_list(thd, orig, des_select)) {
+    return true;
+  }
+  if (init_field_space(thd, orig, des_select) ||
+      copy_merge_table_list_field(thd, orig, des_select) ||
+      copy_global_table_list_field(thd, orig, des_select) ||
+      copy_table_list_field(thd, orig, des_select)) {
+    return true;
+  }
+  return false;
+}
 SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
   Item *item, *new_item;
   Item *where, *having;
@@ -473,7 +813,7 @@ SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
   select = lex->new_query(nullptr);
   if (!select || DBUG_EVALUATE_IF("dup_select_abort1", true, false))
     goto err;
-
+  select->orig = orig;
   select->renumber(thd->lex);
   select->with_sum_func = orig->with_sum_func;
   select->n_child_sum_items = orig->n_child_sum_items;
@@ -486,41 +826,20 @@ SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
   thd->lex->select_lex = select;
 
   // phase 1. clone tables and open/lock them
-  for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr;
-       tbl_list = tbl_list->next_leaf) {
-    LEX_CSTRING *db_name =
-        new(thd->pq_mem_root) LEX_CSTRING{tbl_list->db, tbl_list->db_length};
-    if (db_name == nullptr) {
-      goto err;
-    }
-    LEX_CSTRING *tbl_name = new(thd->pq_mem_root)
-        LEX_CSTRING{tbl_list->table_name, tbl_list->table_name_length};
-    if (tbl_name == nullptr) {
-      goto err;
-    }
-    Table_ident *tbl_ident =
-        new(thd->pq_mem_root) Table_ident(*db_name, *tbl_name);
-    if (!tbl_ident) {
-      goto err;
-    }
-    TABLE_LIST * tbl = select->add_table_to_list(thd, tbl_ident, tbl_list->alias, 0, TL_IGNORE);
-    if (!tbl ) {
-      goto err;
-    }
-    tbl->set_lock({TL_UNLOCK, THR_DEFAULT});
+  if (copy_all_table_list(thd, orig, select)) {
+    goto err;
   }
-
+  
   DBUG_ASSERT(select->context.select_lex == select);
   select->context.table_list = select->context.first_name_resolution_table =
-      select->table_list.first;
-
+      select->leaf_tables;
+  
   // phase 1. open tables and lock them
   if (open_tables_for_query(thd, thd->lex->query_tables, 0) ||
-      select->setup_tables(thd, select->get_table_list(), false) ||
       lock_tables(thd, thd->lex->query_tables, thd->lex->table_count, 0)) {
     goto err;
   }
-
+  set_up_leaf_tables(thd, select);
   // phase 1. copy table->nullable
   // before setup_fields, propagate_nullability will change table->nullable,
   // which may affect item->maybe_null, so we copy it here.
@@ -534,7 +853,7 @@ SELECT_LEX *pq_dup_select(THD *thd, SELECT_LEX *orig) {
       if (!strncmp(db, tl->db, strlen(db)) && strlen(tl->db) == strlen(db) &&
           !strncmp(table_name, tl->table_name, strlen(table_name)) && strlen(tl->table_name) == strlen(table_name) &&
           !strncmp(alias, tl->alias, strlen(alias)) && strlen(tl->alias) == strlen(alias)) {
-        if (tl->table->is_nullable()) {
+        if (tl->table != nullptr && tl->table->is_nullable()) {
           tbl_list->table->set_nullable();
         }
         break;
@@ -672,12 +991,10 @@ static bool pq_select_prepare(THD *thd, SELECT_LEX *select, List<Item> &orig_all
   List_iterator_fast<Item> lm(select->all_fields);
   Item *item = nullptr;
   Item *orig_item = nullptr;
-
   for (uint i = 0; (item = lm++); i++) {
     orig_item = orig_all_fields[i];
-    if (item == nullptr || (item->real_item()->type() != orig_item->real_item()->type())) {
+    if(item == nullptr || (item->type() != orig_item->type()))
       return true;
-    }    
   }
 
   return false;

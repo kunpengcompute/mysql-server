@@ -342,9 +342,70 @@ PQ_CLONE_DEF(Item_default_value) {
   }
 PQ_CLONE_RETURN
 
-Item *Item_view_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
-  return (*ref)->pq_clone(thd, select);
+int find_ref_in_table(TABLE_LIST *tl,Item **ref) {
+  int count = tl->field_translation_end - tl->field_translation;
+  if (count <= 0) {
+    return -1;
+  }
+  for (int i = 0; i < count; i++) {
+    if (*ref == tl->field_translation[i].item) {
+      return i;  
+    }      
+  }
+  return -1;
 }
+
+TABLE_LIST *get_table_in_merge_tablelist(SELECT_LEX *select, TABLE_LIST *tb) {
+  int tableindex = 0;
+  for (TABLE_LIST *tbl_list = select->orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
+    if (tbl_list->merge_underlying_list != nullptr) {
+      int index = get_table_index(tbl_list->merge_underlying_list, TABLE_LIST_TYPE_MERGE, tb);
+      if (index != -1) {
+       TABLE_LIST* tbl = get_table_by_index(select->table_list.first,  TABLE_LIST_TYPE_DEFAULT, tableindex);
+       return get_table_by_index(tbl, TABLE_LIST_TYPE_MERGE, index);
+      }
+    }
+    tableindex++;
+  }
+  return nullptr;
+}
+
+Item *Item_view_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
+  Item **itme_ref = nullptr;
+  TABLE_LIST *found_table = nullptr;
+  int index = get_table_index(select->orig->table_list.first, TABLE_LIST_TYPE_DEFAULT, cached_table);
+  if (index != -1) {
+    found_table = get_table_by_index(select->table_list.first, TABLE_LIST_TYPE_DEFAULT, index);
+  } 
+
+  if (found_table == nullptr) {
+    index = get_table_index(select->orig->leaf_tables, TABLE_LIST_TYPE_GLOBAL, cached_table);
+    if (index != -1) {
+      found_table = get_table_by_index(select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, index);
+    }
+  }
+ 
+  if (found_table == nullptr) {
+    found_table = get_table_in_merge_tablelist(select, cached_table);
+  }
+  if (found_table == nullptr) {
+    return nullptr;
+  }
+  int field_index = find_ref_in_table(cached_table, ref);
+  if (field_index == -1 ||
+      found_table->field_translation == nullptr ||
+      found_table->field_translation_end - found_table->field_translation <= field_index) {
+    return nullptr;
+  }
+  itme_ref = &found_table->field_translation[field_index].item;
+  Item_view_ref *item = new (thd->pq_mem_root) Item_view_ref(&select->context, itme_ref, table_name, orig_table_name,
+                                 field_name, found_table);
+  if (item == nullptr || item->pq_copy_from(thd, select, this)) {
+    return nullptr;
+  }
+  return item;
+}
+
 
 Item *Item_ref::pq_clone(class THD *thd, class SELECT_LEX *select) {
   /*

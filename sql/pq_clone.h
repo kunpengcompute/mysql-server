@@ -31,9 +31,18 @@ class SELECT_LEX;
 class JOIN;
 class ORDER;
 class ORDER_with_src;
+class TABLE_LIST;
+enum table_list_type_enum {
+  TABLE_LIST_TYPE_DEFAULT,
+  TABLE_LIST_TYPE_LEAF,
+  TABLE_LIST_TYPE_GLOBAL,
+  TABLE_LIST_TYPE_MERGE
+};
 
 bool pq_dup_tabs(JOIN *pq_join, JOIN *join, bool setup);
 
+TABLE_LIST *get_table_by_index(TABLE_LIST* start_table, table_list_type_enum list_type, int index);
+int get_table_index(TABLE_LIST* start_table, table_list_type_enum list_type, TABLE_LIST *tl);
 extern Item **resolve_ref_in_select_and_group(THD *thd, Item_ident *ref,
                                               SELECT_LEX *select);
 
