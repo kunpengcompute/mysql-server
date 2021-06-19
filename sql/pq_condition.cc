@@ -124,7 +124,7 @@ bool pq_not_support_func(Item_func *func) {
   }
 
   for (const char* funcname : NO_PQ_SUPPORTED_FUNC_ARGS) {
-    if (!strcmp(func->func_name(), funcname)) {
+    if (!strcmp(func->func_name(), funcname) && func->arg_count != 0) {
       return true;
     }
   }
