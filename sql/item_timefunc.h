@@ -1697,6 +1697,7 @@ class Item_func_internal_update_time final : public Item_datetime_func {
   const char *func_name() const override { return "internal_update_time"; }
   bool resolve_type(THD *thd) override;
   bool get_date(MYSQL_TIME *res, my_time_flags_t fuzzy_date) override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_check_time final : public Item_datetime_func {
@@ -1709,6 +1710,7 @@ class Item_func_internal_check_time final : public Item_datetime_func {
   const char *func_name() const override { return "internal_check_time"; }
   bool resolve_type(THD *thd) override;
   bool get_date(MYSQL_TIME *res, my_time_flags_t fuzzy_date) override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 /* Function prototypes */

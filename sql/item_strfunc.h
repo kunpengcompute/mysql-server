@@ -1412,6 +1412,7 @@ class Item_func_get_dd_create_options final : public Item_str_func {
   const char *func_name() const override { return "get_dd_create_options"; }
 
   String *val_str(String *) override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_get_comment_or_error final : public Item_str_func {
@@ -1438,6 +1439,7 @@ class Item_func_internal_get_comment_or_error final : public Item_str_func {
   }
 
   String *val_str(String *) override;
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_get_dd_tablespace_private_data final : public Item_str_func {

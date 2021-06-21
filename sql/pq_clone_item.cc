@@ -915,6 +915,8 @@ COPY_FUNC_ITEM(Item_func_year, POS(), ARG0)
 COPY_FUNC_ITEM(Item_func_yearweek, POS(), ARG0, ARG1)
 COPY_FUNC_ITEM(Item_typecast_signed, POS(), ARG0)
 COPY_FUNC_ITEM(Item_typecast_unsigned, POS(), ARG0)
+COPY_FUNC_ITEM(Item_func_can_access_table, POS(), ARG0, ARG1)
+COPY_FUNC_ITEM(Item_func_is_visible_dd_object, POS(), ARG0)
 /* Item_int_func end */
 
 /* Item_real_func start */
@@ -1124,6 +1126,114 @@ PQ_CLONE_DEF(Item_func_make_set) {
   }
 PQ_CLONE_RETURN
 
+PQ_CLONE_DEF(Item_func_internal_table_rows) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_table_rows(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_avg_row_length) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_avg_row_length(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_data_length) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_data_length(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_max_data_length) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_max_data_length(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_index_length) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_index_length(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_data_free) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_data_free(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_auto_increment) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_auto_increment(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_update_time) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_update_time(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_check_time) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_check_time(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_checksum) {
+    PQ_CLONE_ARGS
+
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+
+    new_item = new (thd->pq_mem_root) Item_func_internal_checksum(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
+PQ_CLONE_DEF(Item_func_internal_get_comment_or_error) {
+    PQ_CLONE_ARGS
+    PT_item_list pt_item_list;
+    pt_item_list.value = item_list;
+    new_item = new (thd->pq_mem_root) Item_func_internal_get_comment_or_error(POS(), &pt_item_list);
+  }
+PQ_CLONE_RETURN
+
 COPY_FUNC_ITEM(Item_func_monthname, POS(), ARG0)
 COPY_FUNC_ITEM(Item_func_pfs_format_bytes, POS(), ARG0)
 
@@ -1210,7 +1320,7 @@ COPY_FUNC_ITEM(Item_func_rtrim, POS(), ARG0)
 COPY_FUNC_ITEM(Item_func_uncompress, POS(), ARG0)
 COPY_FUNC_ITEM(Item_func_unhex, POS(), ARG0)
 COPY_FUNC_ITEM(Item_func_uuid, POS())
-
+COPY_FUNC_ITEM(Item_func_get_dd_create_options, POS(), ARG0, ARG1, ARG2)
 PQ_CLONE_DEF(Item_func_uuid_to_bin) {
     DBUG_ASSERT(arg_count < 3);
     Item *new_args[4] = {nullptr};

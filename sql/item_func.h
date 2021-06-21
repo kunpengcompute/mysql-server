@@ -2422,6 +2422,7 @@ class Item_func_can_access_table : public Item_int_func {
     maybe_null = true;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_can_access_trigger : public Item_int_func {
@@ -2511,6 +2512,7 @@ class Item_func_is_visible_dd_object : public Item_int_func {
     maybe_null = true;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_table_rows : public Item_int_func {
@@ -2526,6 +2528,7 @@ class Item_func_internal_table_rows : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_avg_row_length : public Item_int_func {
@@ -2541,6 +2544,7 @@ class Item_func_internal_avg_row_length : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_data_length : public Item_int_func {
@@ -2556,6 +2560,7 @@ class Item_func_internal_data_length : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_max_data_length : public Item_int_func {
@@ -2571,6 +2576,7 @@ class Item_func_internal_max_data_length : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_index_length : public Item_int_func {
@@ -2586,6 +2592,7 @@ class Item_func_internal_index_length : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_data_free : public Item_int_func {
@@ -2601,6 +2608,7 @@ class Item_func_internal_data_free : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_auto_increment : public Item_int_func {
@@ -2616,6 +2624,7 @@ class Item_func_internal_auto_increment : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_checksum : public Item_int_func {
@@ -2630,6 +2639,7 @@ class Item_func_internal_checksum : public Item_int_func {
     null_on_null = false;
     return false;
   }
+  Item *pq_clone(THD *thd, SELECT_LEX *select) override;
 };
 
 class Item_func_internal_keys_disabled : public Item_int_func {
