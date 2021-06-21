@@ -141,7 +141,7 @@ SELECT t2.col_varchar_key FROM t2 WHERE t2.pk > t1.col_int
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	#	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	#	100.00	NULL
-2	SIMPLE	t2	NULL	index	PRIMARY,col_varchar_key	col_varchar_key	7	NULL	#	100.00	Using where; Using index
+2	SIMPLE	t2	NULL	index	PRIMARY,col_varchar_key	col_varchar_key	7	NULL	#	100.00	Using where; Using index; LooseScan
 2	SIMPLE	t3	NULL	ref	col_varchar_key	col_varchar_key	7	test.t2.col_varchar_key	#	100.00	Using index
 Warnings:
 Note	1276	Field or reference 'test.t1.col_int' of SELECT #2 was resolved in SELECT #1
@@ -189,15 +189,15 @@ FROM t3 JOIN t4 ON t3.pk = t4.pk
 );
 EXPLAIN
 -> Parallel scan on <temporary>
-    -> Inner hash join (t2.b = t1.a)  (cost=2.90 rows=2)
+    -> Inner hash join (t2.b = t1.a)  (cost=2.00 rows=2)
         -> Table scan on t2  (cost=0.18 rows=3)
         -> Hash
-            -> Nested loop semijoin  (cost=2.05 rows=2)
-                -> Nested loop inner join  (cost=1.15 rows=2)
-                    -> PQblock scan on t1  (cost=0.45 rows=2)
+            -> Nested loop inner join  (cost=1.15 rows=2)
+                -> PQblock scan on t1  (cost=0.45 rows=2)
+                -> Nested loop semijoin with duplicate removal on b_key  (cost=1.00 rows=1)
                     -> Index lookup on t3 using b_key (b=t1.a)  (cost=0.30 rows=1)
-                -> Filter: (t4.pk = t3.pk)  (cost=0.30 rows=1)
-                    -> Table scan on t4  (cost=0.30 rows=2)
+                    -> Filter: (t4.pk = t3.pk)  (cost=0.30 rows=1)
+                        -> Table scan on t4  (cost=0.30 rows=2)
 
 SELECT *
 FROM t1
