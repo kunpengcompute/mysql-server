@@ -22,6 +22,7 @@
 
 SET(TESTS
   pq_condition
+  message_queue
 )
 
 SET(ALL_PARALLEL_TESTS)
