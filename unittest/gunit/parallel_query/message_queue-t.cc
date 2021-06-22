@@ -78,11 +78,16 @@ TEST_F(MessageQueueTest, SendMsg) {
   MQueue_handle mqHandle(&mq,bufferLen);
   mqHandle.init_mqueue_handle(thd);
 
-  char data[5] = "aaaa";
+  char data[5] = "abcd";
   MQ_RESULT ret;
 
   ret = mqHandle.send((void*)data, 5, false);
   EXPECT_EQ(MQ_SUCCESS, ret);
+  EXPECT_EQ('a', mq.m_buffer[4]);
+  EXPECT_EQ('b', mq.m_buffer[5]);
+  EXPECT_EQ('c', mq.m_buffer[6]);
+  EXPECT_EQ('d', mq.m_buffer[7]);
+  EXPECT_EQ('\0', mq.m_buffer[8]);
 }
 
 // test the exception branch
@@ -155,5 +160,72 @@ TEST_F(MessageQueueTest, SendRawDataMsg) {
 
 }
 
+
+// test recevier msg
+TEST_F(MessageQueueTest, ReceiveMsg) {
+  MQueue mq;
+  int ringBufferLen = 100, handleBufferLen = 10;
+  char ringBuffer[100];
+  MQ_RESULT ret;
+  MQ_event send_event, receiver_event;
+  mq.m_buffer = ringBuffer;
+  mq.m_ring_size = ringBufferLen;
+  mq.m_sender_event = &send_event;
+  mq.m_receiver_event = &receiver_event;
+  MQueue_handle mqHandle(&mq,handleBufferLen);
+  mqHandle.init_mqueue_handle(thd);
+
+  char data[5] = "abcd";
+  ret = mqHandle.send((void*)data, 5, false);
+
+  char *datap;
+  uint32 receiveBytes;
+  ret = mqHandle.receive((void **)&datap, &receiveBytes);
+  EXPECT_EQ(MQ_SUCCESS, ret);
+  EXPECT_EQ('a', datap[0]);
+  EXPECT_EQ('b', datap[1]);
+  EXPECT_EQ('c', datap[2]);
+  EXPECT_EQ('d', datap[3]);
+  EXPECT_EQ('\0', datap[4]);
+  EXPECT_EQ(5, receiveBytes);
+
+  // re-alloc handle buffer size test, len > handleBufferLen
+  char data2[15] = "aaaaabbbbbcccc";
+  mqHandle.send((void*)data2, 15, false);
+  ret = mqHandle.receive((void **)&datap, &receiveBytes);
+  EXPECT_EQ(MQ_SUCCESS, ret);
+  EXPECT_EQ(15, receiveBytes);
+  EXPECT_STREQ("aaaaabbbbbcccc",datap);
+}
+
+
+// test the  receive  exception branch
+TEST_F(MessageQueueTest, ReceiveMsgError) {
+  MQueue mq;
+  int ringBufferLen = 100, handleBufferLen = 10;
+  char ringBuffer[100];
+  MQ_RESULT ret;
+  MQ_event send_event, receiver_event;
+  mq.m_buffer = ringBuffer;
+  mq.m_ring_size = ringBufferLen;
+  mq.m_sender_event = &send_event;
+  mq.m_receiver_event = &receiver_event;
+  MQueue_handle mqHandle(&mq,handleBufferLen);
+  mqHandle.init_mqueue_handle(thd);
+
+
+  char *datap;
+  uint32 receiveBytes;
+
+  // send data to msg queue
+  char data[5] = "abcd";
+  mqHandle.send((void*)data, 5, false);
+  // pq error
+  thd->pq_error = true;
+  ret = mqHandle.receive((void **)&datap, &receiveBytes);
+  EXPECT_EQ(MQ_DETACHED, ret);
+  thd->pq_error = false;  // set the default value
+
+}
 
 } // end namespace parallelscaniterator_unittest
