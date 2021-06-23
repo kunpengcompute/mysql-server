@@ -1243,7 +1243,7 @@ ON 3 IN (SELECT t3.col_int_nokey FROM t1 AS t3)
 WHERE t1.pk=26;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	const	PRIMARY	PRIMARY	4	const	1	100.00	NULL
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	const	PRIMARY	PRIMARY	4	const	1	100.00	NULL
 2	SIMPLE	t3	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Start temporary
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	End temporary

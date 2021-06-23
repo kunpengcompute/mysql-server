@@ -26,7 +26,7 @@ count(*)
 explain SELECT count(*) FROM t1 JOIN t2 JOIN t3
 WHERE t1.f1 IN (SELECT f1 FROM t4) AND t2.f1 IN (SELECT f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -80,7 +80,7 @@ explain SELECT /*+ JOIN_SUFFIX(t3, t2) JOIN_SUFFIX(t2, t1) */ count(*) FROM t1 J
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -99,7 +99,7 @@ explain SELECT /*+ JOIN_ORDER(t3, t2) JOIN_ORDER(t1, t2, t5) */ count(*) FROM t1
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Parallel execute (1 workers)
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Start temporary
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
 2	SIMPLE	t3	NULL	ALL	NULL	NULL	NULL	NULL	5	100.00	Using join buffer (hash join)
@@ -119,7 +119,7 @@ explain SELECT /*+ JOIN_ORDER(t1, t7, t5) */ count(*) FROM t1 JOIN t2 JOIN t3
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -158,7 +158,7 @@ explain SELECT /*+ JOIN_ORDER(t3, t2) JOIN_ORDER(t2, t3) */ count(*) FROM t1 JOI
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -176,7 +176,7 @@ explain SELECT /*+ JOIN_ORDER(t3, t2) JOIN_SUFFIX(t3) */ count(*) FROM t1 JOIN t
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -194,7 +194,7 @@ explain SELECT /*+ JOIN_ORDER(t3, t2) JOIN_PREFIX(t2) */ count(*) FROM t1 JOIN t
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -344,7 +344,7 @@ explain SELECT /*+  QB_NAME(q1) */ count(*) FROM t1 JOIN t2 JOIN t3
 WHERE t1.f1 IN (SELECT /*+ QB_NAME(subq1) */ f1 FROM t4)
 AND t2.f1 IN (SELECT /*+ QB_NAME(subq2) */ f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -359,7 +359,7 @@ count(*)
 explain SELECT count(*) FROM t1 JOIN t2 STRAIGHT_JOIN t3
 WHERE t1.f1 IN (SELECT f1 FROM t4) AND t2.f1 IN (SELECT f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -375,7 +375,7 @@ count(*)
 explain SELECT /*+ JOIN_PREFIX(t3, t1) */ count(*) FROM t1 JOIN t2 STRAIGHT_JOIN t3
 WHERE t1.f1 IN (SELECT f1 FROM t4) AND t2.f1 IN (SELECT f1 FROM t5);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t5	NULL	index	PRIMARY	PRIMARY	4	NULL	1	100.00	Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
@@ -1127,7 +1127,7 @@ COUNT(*) FROM t1 JOIN t2 AS ta3 JOIN t2 AS ta4
 WHERE ta4.f1 IN (SELECT /*+ QB_NAME(qb1) */ f1 FROM t4) AND
 ta3.f2 IN (SELECT /*+ QB_NAME(qb2) */ f2 FROM t2);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
 2	SIMPLE	ta4	NULL	eq_ref	PRIMARY	PRIMARY	4	test.t4.f1	1	100.00	Using index; End temporary
@@ -1146,7 +1146,7 @@ COUNT(*) FROM t1 JOIN t2 AS ta3 JOIN t2 AS ta4
 WHERE ta4.f1 IN (SELECT /*+ QB_NAME(qb1) */ f1 FROM t4) AND
 ta3.f2 IN (SELECT /*+ QB_NAME(qb2) */ f2 FROM t2);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	3	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	3	100.00	Parallel execute (1 workers)
 2	SIMPLE	t2	NULL	index	f2	f2	5	NULL	3	100.00	Using where; Using index; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; Using join buffer (hash join)
 2	SIMPLE	ta3	NULL	ref	f2	f2	5	test.t2.f2	1	100.00	Using index

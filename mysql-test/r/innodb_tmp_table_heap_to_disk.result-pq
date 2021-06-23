@@ -54,7 +54,7 @@ a	b	c
 set optimizer_switch='materialization=off';
 explain select * from t1 where a in (select a from t11) order by 1, 2, 3 limit 1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	x	100.00	Start temporary; Parallel execute (4 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	x	100.00	Parallel execute (4 workers)
 2	SIMPLE	t11	NULL	ALL	NULL	NULL	NULL	NULL	x	100.00	Using temporary; Using filesort; Start temporary
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	x	10.00	Using where; End temporary; Using join buffer (hash join)
 Warnings:
