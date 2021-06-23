@@ -225,7 +225,7 @@ PQ_CLONE_RETURN
 
 /* Item_hex_string start */
 PQ_CLONE_DEF(Item_hex_string) {
-    new_item = new (thd->mem_root) Item_hex_string(POS());
+    new_item = new (thd->pq_mem_root) Item_hex_string(POS());
   }
 PQ_CLONE_RETURN
 
@@ -550,7 +550,7 @@ PQ_CLONE_DEF(Item_func_max) {
     PT_item_list pt_item_list;
     pt_item_list.value = item_list;
 
-    new_item = new (thd->mem_root) Item_func_max(POS(), &pt_item_list);
+    new_item = new (thd->pq_mem_root) Item_func_max(POS(), &pt_item_list);
   }
 PQ_CLONE_RETURN
 
@@ -560,7 +560,7 @@ PQ_CLONE_DEF(Item_func_min) {
     PT_item_list pt_item_list;
     pt_item_list.value = item_list;
 
-    new_item = new (thd->mem_root) Item_func_min(POS(), &pt_item_list);
+    new_item = new (thd->pq_mem_root) Item_func_min(POS(), &pt_item_list);
   }
 PQ_CLONE_RETURN
 /* Item_func_min_max end */
@@ -601,7 +601,7 @@ PQ_CLONE_DEF(Item_func_regexp_like) {
     PT_item_list pt_item_list;
     pt_item_list.value = item_list;
 
-    new_item = new (thd->mem_root) Item_func_regexp_like(POS(), &pt_item_list);
+    new_item = new (thd->pq_mem_root) Item_func_regexp_like(POS(), &pt_item_list);
   }
 PQ_CLONE_RETURN
 /* Item_func_regexp end */
@@ -609,7 +609,7 @@ PQ_CLONE_RETURN
 /* Item_func_weekday start */
 PQ_CLONE_DEF(Item_func_weekday) {
     PQ_CLONE_ARGS    
-    new_item = new (thd->mem_root)
+    new_item = new (thd->pq_mem_root)
         Item_func_weekday(POS(), item_list[0], this->odbc_type);
   }
 PQ_CLONE_RETURN
@@ -793,7 +793,7 @@ PQ_CLONE_DEF(Item_func_field) {
     PT_item_list pt_item_list;
     pt_item_list.value = item_list;
 
-    new_item = new (thd->mem_root) Item_func_field(POS(), &pt_item_list);
+    new_item = new (thd->pq_mem_root) Item_func_field(POS(), &pt_item_list);
   }
 PQ_CLONE_RETURN
 
@@ -1048,7 +1048,7 @@ COPY_FUNC_ITEM(Item_func_conv_charset, POS(), ARG0, conv_charset)
 
 PQ_CLONE_DEF(Item_func_date_format) {
     PQ_CLONE_ARGS
-    new_item = new (thd->mem_root) Item_func_date_format(
+    new_item = new (thd->pq_mem_root) Item_func_date_format(
         POS(), item_list[0], item_list[1], this->is_time_format);
   }
 PQ_CLONE_RETURN
@@ -1067,7 +1067,7 @@ PQ_CLONE_DEF(Item_func_elt) {
     PT_item_list pt_item_list;
     pt_item_list.value = item_list;
 
-    new_item = new (thd->mem_root) Item_func_elt(POS(), &pt_item_list);
+    new_item = new (thd->pq_mem_root) Item_func_elt(POS(), &pt_item_list);
   }
 PQ_CLONE_RETURN
 
@@ -1255,7 +1255,7 @@ COPY_FUNC_ITEM(Item_func_random_bytes, POS(), ARG0)
 PQ_CLONE_DEF(Item_func_right) {
     PQ_CLONE_ARGS
     new_item =
-        new (thd->mem_root) Item_func_right(POS(), item_list[0], item_list[1]);
+        new (thd->pq_mem_root) Item_func_right(POS(), item_list[0], item_list[1]);
   }
 PQ_CLONE_RETURN
 
@@ -1307,11 +1307,11 @@ PQ_CLONE_DEF(Item_func_trim) {
     PQ_CLONE_ARGS
 
     if (arg_count > 1)
-      new_item = new (thd->mem_root)
+      new_item = new (thd->pq_mem_root)
           Item_func_trim(POS(), item_list[0], item_list[1], m_trim_mode);
     else
       new_item =
-          new (thd->mem_root) Item_func_trim(POS(), item_list[0], m_trim_mode);
+          new (thd->pq_mem_root) Item_func_trim(POS(), item_list[0], m_trim_mode);
   }
 PQ_CLONE_RETURN
 
@@ -1493,7 +1493,7 @@ PQ_COPY_FROM_RETURN
 
 PQ_CLONE_DEF(Item_func_curtime_local) {
     PQ_CLONE_ARGS
-    new_item = new (thd->mem_root) Item_func_curtime_local(POS(), this->decimals);
+    new_item = new (thd->pq_mem_root) Item_func_curtime_local(POS(), this->decimals);
   }
 PQ_CLONE_RETURN
 
@@ -1601,7 +1601,7 @@ PQ_CLONE_DEF(Item_sum_and) {
     Item *arg = args[0]->pq_clone(thd, select);
     if (nullptr == arg) return nullptr;
 
-    new_item = new (thd->mem_root) Item_sum_and(POS(), arg, nullptr);
+    new_item = new (thd->pq_mem_root) Item_sum_and(POS(), arg, nullptr);
   }
 PQ_CLONE_RETURN
 
@@ -1614,7 +1614,7 @@ PQ_CLONE_DEF(Item_sum_or) {
     Item *arg = args[0]->pq_clone(thd, select);
     if (nullptr == arg) return nullptr;
 
-    new_item = new (thd->mem_root) Item_sum_or(POS(), arg, nullptr);
+    new_item = new (thd->pq_mem_root) Item_sum_or(POS(), arg, nullptr);
   }
 PQ_CLONE_RETURN
 
@@ -1627,7 +1627,7 @@ PQ_CLONE_DEF(Item_sum_xor) {
     Item *arg = args[0]->pq_clone(thd, select);
     if (nullptr == arg) return nullptr;
 
-    new_item = new (thd->mem_root) Item_sum_xor(POS(), arg, nullptr);
+    new_item = new (thd->pq_mem_root) Item_sum_xor(POS(), arg, nullptr);
   }
 PQ_CLONE_RETURN
 
@@ -1841,7 +1841,7 @@ PQ_CLONE_DEF(Item_func_trig_cond) {
   if (arg_count > 0)
     arg = args[0]->pq_clone(thd, select);
   if (nullptr == arg) return nullptr;
-  new_item = new(thd->mem_root) Item_func_trig_cond(arg, trig_var, thd->lex->unit->first_select()->join, m_idx,trig_type);
+  new_item = new(thd->pq_mem_root) Item_func_trig_cond(arg, trig_var, thd->lex->unit->first_select()->join, m_idx,trig_type);
 } 
 PQ_CLONE_RETURN
 

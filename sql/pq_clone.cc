@@ -81,7 +81,7 @@ bool QEP_TAB::pq_copy(THD *thd, QEP_TAB *orig) {
   do_parallel_scan = orig->do_parallel_scan;
   firstmatch_return = orig->firstmatch_return;
   cache_idx_cond = orig->cache_idx_cond;
-
+  loosescan_key_len = orig->loosescan_key_len;
   POSITION *position = new (thd->pq_mem_root) POSITION;
   if (!position || position->pq_copy(thd, orig->position()))
     return true;
