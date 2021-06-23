@@ -590,6 +590,8 @@ PQ_exec_status make_pq_leader_plan(THD *thd) {
     DBUG_ASSERT(tab->table()->s->table_category == TABLE_CATEGORY_TEMPORARY);
     tab->set_type(JT_ALL);
     tab->gather = gather;
+    tab->check_weed_out_table = nullptr;
+    tab->flush_weedout_table = nullptr;
 
     // create TABLE_LIST object for explain
     TABLE_LIST *tbl = new (thd->pq_mem_root) TABLE_LIST;

@@ -1925,7 +1925,8 @@ bool Explain_format_JSON::begin_context(enum_parsing_context ctx_arg,
                   current_context->type == CTX_DISTINCT ||
                   current_context->type == CTX_WINDOW ||
                   current_context->type == CTX_BUFFER_RESULT ||
-                  current_context->type == CTX_MATERIALIZATION);
+                  current_context->type == CTX_MATERIALIZATION ||
+                  current_context->type == CTX_GATHER);
       duplication_weedout_ctx *ctx =
           new (*THR_MALLOC) duplication_weedout_ctx(current_context);
       if (ctx == nullptr || current_context->add_join_tab(ctx)) return true;
