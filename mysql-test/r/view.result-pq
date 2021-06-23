@@ -5015,7 +5015,7 @@ Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` semi join (`test`.`t2`) where ((`test`.`t1`.`a` = `test`.`t2`.`a`) and ((`test`.`t2`.`a` % 2) = 0))
 explain SELECT * FROM (SELECT * FROM t1 WHERE a IN (SELECT a FROM t2 WHERE a % 2 = 0)) AS dt;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Parallel execute (1 workers)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Using where; Start temporary
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Using where; End temporary; Using join buffer (hash join)
 Warnings:
@@ -5083,7 +5083,7 @@ Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t2`.`a` AS `a` from `test`.`t1` semi join (`test`.`t2`) join `test`.`t2` where ((`test`.`t2`.`a` = `test`.`t1`.`a`) and (`test`.`t1`.`b` = (`test`.`t2`.`a` * 10)))
 explain SELECT * FROM (SELECT a, b FROM t1 WHERE b IN (SELECT a*10 FROM t2)) AS dt JOIN t2 ON dt.a=t2.a;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Parallel execute (1 workers)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Start temporary
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Using where; End temporary; Using join buffer (hash join)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	#	#	Using where; Using join buffer (hash join)

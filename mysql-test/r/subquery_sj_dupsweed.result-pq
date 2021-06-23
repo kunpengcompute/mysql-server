@@ -5873,7 +5873,7 @@ ON t4.a=100
 ON TRUE
 WHERE t1.a IN (SELECT * FROM v AS it2);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary
 2	SIMPLE	it2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; Using join buffer (hash join)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
@@ -8907,7 +8907,7 @@ WHERE col_varchar_key IN (SELECT col_varchar_nokey
 FROM t2)
 ORDER BY col_datetime_key LIMIT 4;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	6	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	6	100.00	Parallel execute (1 workers)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	6	100.00	Using temporary; Using filesort; Start temporary
 2	SIMPLE	t1	NULL	ref	col_varchar_key	col_varchar_key	6	test.t2.col_varchar_nokey	1	100.00	End temporary
 Warnings:
@@ -12098,7 +12098,7 @@ WHERE innr.pk <= 7
 )
 ;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	innr	NULL	range	PRIMARY,col_varchar_key	PRIMARY	4	NULL	1	100.00	Using where; Start temporary
 2	SIMPLE	outr	NULL	ALL	NULL	NULL	NULL	NULL	3	33.33	Using where; End temporary; Using join buffer (hash join)
 Warnings:
@@ -12179,7 +12179,7 @@ FROM t3
 WHERE t3.pk < 3
 );
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary
 2	SIMPLE	t3	NULL	range	PRIMARY,c1_key	PRIMARY	4	NULL	1	100.00	Using where; Using join buffer (hash join)
 2	SIMPLE	t2	NULL	ref	PRIMARY,c1_key	c1_key	6	test.t3.c1	1	33.33	Using where; Using index; End temporary

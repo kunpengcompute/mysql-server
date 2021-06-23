@@ -5873,7 +5873,7 @@ ON t4.a=100
 ON TRUE
 WHERE t1.a IN (SELECT * FROM v AS it2);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary
 2	SIMPLE	it2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; Using join buffer (hash join)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
@@ -8899,7 +8899,7 @@ WHERE col_varchar_key IN (SELECT col_varchar_nokey
 FROM t2)
 ORDER BY col_datetime_key LIMIT 4;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	6	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	6	100.00	Parallel execute (1 workers)
 2	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	6	100.00	Using temporary; Using filesort; Start temporary
 2	SIMPLE	t1	NULL	ref	col_varchar_key	col_varchar_key	6	test.t2.col_varchar_nokey	1	100.00	End temporary
 Warnings:
@@ -12463,7 +12463,7 @@ WHERE t3.col_int IS NULL
 ORDER BY col_int_key
 ;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	7	100.00	Start temporary; Parallel execute (1 workers)
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	7	100.00	Parallel execute (1 workers)
 2	SIMPLE	t1	NULL	index	col_int_key	col_int_key	5	NULL	7	100.00	Using index; Using temporary; Using filesort; Start temporary
 2	SIMPLE	t4	NULL	ALL	NULL	NULL	NULL	NULL	6	16.67	Using where; Using join buffer (hash join)
 2	SIMPLE	t2	NULL	eq_ref	PRIMARY	PRIMARY	4	test.t1.pk	1	100.00	NULL
