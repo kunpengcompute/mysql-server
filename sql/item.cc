@@ -5973,6 +5973,10 @@ void Item_field::make_field(Send_field *tmp_field) {
   if (table_name) tmp_field->table_name = table_name;
   if (db_name) tmp_field->db_name = db_name;
   tmp_field->field = true;
+  if (ref) {
+    tmp_field->org_col_name = ref_col_name;
+    tmp_field->org_table_name = orig_table_name;
+  }
 }
 
 /**

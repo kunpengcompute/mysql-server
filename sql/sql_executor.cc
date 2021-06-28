@@ -6496,6 +6496,14 @@ bool change_to_use_tmp_fields(List<Item> &all_fields,
         Item_ref *iref = (Item_ref *)item;
         ifield->table_name = iref->table_name;
         ifield->db_name = iref->db_name;
+        if (thd->parallel_exec) {
+          ifield->ref = true;
+          Send_field tmp_field;
+          item->make_field(&tmp_field);
+          ifield->field->flags = tmp_field.flags;
+          ifield->ref_col_name = iref->item_name.ptr();
+          ifield->orig_table_name = iref->orig_table_name;
+        }
       }
 #ifndef DBUG_OFF
       /* Do not set the item_name here when parallel query to keep the MTR 

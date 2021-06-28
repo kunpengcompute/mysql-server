@@ -1046,6 +1046,7 @@ bool System_variables::pq_copy_from(struct System_variables orig) {
   option_bits = orig.option_bits;
   explicit_defaults_for_timestamp = orig.explicit_defaults_for_timestamp;
   sortbuff_size = orig.sortbuff_size;
+  join_buff_size = orig.join_buff_size;
   return false;
 }
 
