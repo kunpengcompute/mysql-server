@@ -3372,7 +3372,9 @@ class Item_ident : public Item {
     of those is shorter than life-time of Item_field.
   */
   const char *orig_db_name;
+ public:  
   const char *orig_table_name;
+ protected:
   const char *orig_field_name;
   bool m_alias_of_expr;  ///< if this Item's name is alias of SELECT expression
 
@@ -3625,7 +3627,8 @@ class Item_field : public Item_ident {
   TABLE_LIST *table_ref;
   /// Source field
   Field *field;
-
+  const char *ref_col_name{nullptr};
+  bool ref{false};
  private:
   /**
     Item's original field. Used to compare fields in Item_field::eq() in order

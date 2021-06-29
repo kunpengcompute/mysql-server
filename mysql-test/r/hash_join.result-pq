@@ -303,7 +303,7 @@ SUM(t1.col1)	SUM(t2.col1)
 SELECT COUNT_STAR > 0 FROM performance_schema.file_summary_by_event_name
 WHERE event_name LIKE '%hash_join%';
 COUNT_STAR > 0
-0
+1
 SET join_buffer_size = DEFAULT;
 DROP TABLE t1,t2;
 # See that spill to disk (GRACE hash join) works with all kind of
@@ -434,11 +434,12 @@ test.t1	analyze	status	OK
 test.t2	analyze	status	OK
 EXPLAIN FORMAT=tree SELECT * FROM t2 WHERE (t2.i) IN (SELECT t1.i FROM t1);
 EXPLAIN
--> Remove duplicate t2 rows using temporary table (weedout)  (cost=1.30 rows=2)
-    -> Inner hash join (t1.i = t2.i)  (cost=1.30 rows=2)
-        -> Table scan on t1  (cost=0.18 rows=3)
-        -> Hash
-            -> Table scan on t2  (cost=0.45 rows=2)
+-> Parallel scan on <temporary>
+    -> Remove duplicate t2 rows using temporary table (weedout)  (cost=1.30 rows=2)
+        -> Inner hash join (t1.i = t2.i)  (cost=1.30 rows=2)
+            -> Table scan on t1  (cost=0.18 rows=3)
+            -> Hash
+                -> PQblock scan on t2  (cost=0.45 rows=2)
 
 SELECT * FROM t2 WHERE (t2.i) IN (SELECT t1.i FROM t1);
 i
@@ -470,12 +471,14 @@ SET join_buffer_size = 2048;
 EXPLAIN FORMAT=tree
 SELECT COUNT(*) FROM t2 WHERE (t2.i) IN (SELECT t1.i FROM t1);
 EXPLAIN
--> Aggregate: count(0)
-    -> Remove duplicate t2 rows using temporary table (weedout)  (cost=*** rows=39322)
-        -> Inner hash join (t1.i = t2.i)  (cost=*** rows=39322)
-            -> Table scan on t1  (cost=*** rows=768)
-            -> Hash
-                -> Table scan on t2  (cost=*** rows=512)
+-> Aggregate: count(`COUNT(*)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: count(0)
+            -> Remove duplicate t2 rows using temporary table (weedout)  (cost=*** rows=39322)
+                -> Inner hash join (t1.i = t2.i)  (cost=*** rows=39322)
+                    -> Table scan on t1  (cost=*** rows=768)
+                    -> Hash
+                        -> PQblock scan on t2  (cost=*** rows=512)
 
 TRUNCATE performance_schema.file_summary_by_event_name;
 SELECT COUNT_STAR > 0 FROM performance_schema.file_summary_by_event_name
@@ -787,13 +790,16 @@ field1;
 EXPLAIN
 -> Table scan on <temporary>
     -> Temporary table with deduplication
-        -> Inner hash join (no condition)  (cost=4.65 rows=27)
-            -> Index scan on alias1 using idx_CC_col_varchar_key  (cost=0.18 rows=3)
-            -> Hash
-                -> Nested loop antijoin  (cost=1.70 rows=9)
-                    -> Table scan on t1  (cost=0.55 rows=3)
-                    -> Filter: (alias2.col_varchar_key >= t1.col_varchar)  (cost=0.55 rows=3)
-                        -> Index range scan on alias2 (re-planned for each iteration)  (cost=0.55 rows=3)
+        -> Parallel scan on <temporary>
+            -> Table scan on <temporary>
+                -> Temporary table with deduplication
+                    -> Inner hash join (no condition)  (cost=4.65 rows=27)
+                        -> Index scan on alias1 using idx_CC_col_varchar_key  (cost=0.18 rows=3)
+                        -> Hash
+                            -> Nested loop antijoin  (cost=1.70 rows=9)
+                                -> PQblock scan on t1  (cost=0.55 rows=3)
+                                -> Filter: (alias2.col_varchar_key >= t1.col_varchar)  (cost=0.55 rows=3)
+                                    -> Index range scan on alias2 (re-planned for each iteration)  (cost=0.55 rows=3)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.col_varchar' of SELECT #2 was resolved in SELECT #1
@@ -873,17 +879,18 @@ WHERE (NOT EXISTS
 ON alias4.col_varchar = alias3.col_varchar_key)
 WHERE alias3.pk >= table1.pk));
 EXPLAIN
--> Nested loop antijoin  (cost=2.30 rows=8)
-    -> Filter: ((table1.pk = table2.pk) or (table1.col_varchar < 'D'))  (cost=1.00 rows=2)
-        -> Inner hash join (no condition)  (cost=1.00 rows=2)
-            -> Table scan on table1  (cost=0.45 rows=4)
-            -> Hash
-                -> Index scan on table2 using varchar_key  (cost=0.35 rows=1)
-    -> Nested loop inner join  (cost=2.85 rows=4)
-        -> Filter: (alias3.pk >= table1.pk)  (cost=0.45 rows=4)
-            -> Index range scan on alias3 (re-planned for each iteration)  (cost=0.45 rows=4)
-        -> Filter: (alias4.col_varchar = alias3.col_varchar_key)  (cost=1.05 rows=1)
-            -> Table scan on alias4  (cost=1.05 rows=1)
+-> Parallel scan on <temporary>
+    -> Nested loop antijoin  (cost=2.30 rows=8)
+        -> Filter: ((table1.pk = table2.pk) or (table1.col_varchar < 'D'))  (cost=1.00 rows=2)
+            -> Inner hash join (no condition)  (cost=1.00 rows=2)
+                -> Table scan on table1  (cost=0.45 rows=4)
+                -> Hash
+                    -> PQblock scan on table2 using varchar_key  (cost=0.35 rows=1)
+        -> Nested loop inner join  (cost=2.85 rows=4)
+            -> Filter: (alias3.pk >= table1.pk)  (cost=0.45 rows=4)
+                -> Index range scan on alias3 (re-planned for each iteration)  (cost=0.45 rows=4)
+            -> Filter: (alias4.col_varchar = alias3.col_varchar_key)  (cost=1.05 rows=1)
+                -> Table scan on alias4  (cost=1.05 rows=1)
 
 Warnings:
 Note	1276	Field or reference 'test.table1.pk' of SELECT #2 was resolved in SELECT #1
@@ -1130,21 +1137,23 @@ COUNT(*) FROM t1 JOIN t2 AS ta3 JOIN t2 AS ta4
 WHERE ta4.f1 IN (SELECT /*+ QB_NAME(qb1) */ f1 FROM t4) AND
 ta3.f2 IN (SELECT /*+ QB_NAME(qb2) */ f2 FROM t2);
 EXPLAIN
--> Aggregate: count(0)
-    -> Inner hash join (no condition)  (cost=3.70 rows=4)
-        -> Table scan on t1  (cost=0.08 rows=1)
-        -> Hash
-            -> Remove duplicate (ta3, ta4) rows using temporary table (weedout)  (cost=3.00 rows=4)
-                -> Nested loop inner join  (cost=3.00 rows=4)
-                    -> Nested loop inner join  (cost=2.30 rows=4)
-                        -> Inner hash join (no condition)  (cost=1.10 rows=3)
-                            -> Filter: (t4.f1 is not null)  (cost=0.12 rows=1)
-                                -> Table scan on t4  (cost=0.12 rows=1)
-                            -> Hash
-                                -> Filter: (t2.f2 is not null)  (cost=0.55 rows=3)
-                                    -> Index scan on t2 using f2  (cost=0.55 rows=3)
-                        -> Index lookup on ta3 using f2 (f2=t2.f2)  (cost=0.30 rows=2)
-                    -> Single-row index lookup on ta4 using PRIMARY (f1=t4.f1)  (cost=0.08 rows=1)
+-> Aggregate: count(`COUNT(*)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: count(0)
+            -> Inner hash join (no condition)  (cost=3.70 rows=4)
+                -> Table scan on t1  (cost=0.08 rows=1)
+                -> Hash
+                    -> Remove duplicate (ta3, ta4) rows using temporary table (weedout)  (cost=3.00 rows=4)
+                        -> Nested loop inner join  (cost=3.00 rows=4)
+                            -> Nested loop inner join  (cost=2.30 rows=4)
+                                -> Inner hash join (no condition)  (cost=1.10 rows=3)
+                                    -> Filter: (t4.f1 is not null)  (cost=0.12 rows=1)
+                                        -> Table scan on t4  (cost=0.12 rows=1)
+                                    -> Hash
+                                        -> Filter: (t2.f2 is not null)  (cost=0.55 rows=3)
+                                            -> PQblock scan on t2 using f2  (cost=0.55 rows=3)
+                                -> Index lookup on ta3 using f2 (f2=t2.f2)  (cost=0.30 rows=2)
+                            -> Single-row index lookup on ta4 using PRIMARY (f1=t4.f1)  (cost=0.08 rows=1)
 
 SELECT /*+ JOIN_PREFIX(t2@qb2, t4@qb1, ta3, ta4) */
 COUNT(*) FROM t1 JOIN t2 AS ta3 JOIN t2 AS ta4
@@ -1731,7 +1740,7 @@ SELECT * FROM t1, t2 WHERE t1.col1 = t2.col1;
 SELECT COUNT_STAR > 0 FROM performance_schema.file_summary_by_event_name
 WHERE event_name LIKE '%hash_join%';
 COUNT_STAR > 0
-0
+1
 # This should NOT spill to disk since we have a LIMIT.
 TRUNCATE performance_schema.file_summary_by_event_name;
 SELECT * FROM t1, t2 WHERE t1.col1 = t2.col1 LIMIT 1;
@@ -1747,7 +1756,7 @@ col1	col1
 SELECT COUNT_STAR > 0 FROM performance_schema.file_summary_by_event_name
 WHERE event_name LIKE '%hash_join%';
 COUNT_STAR > 0
-0
+1
 # This should spill to disk since we have (implicit) grouping.
 TRUNCATE performance_schema.file_summary_by_event_name;
 SELECT SUM(t1.col1) FROM t1, t2 WHERE t1.col1 = t2.col1 LIMIT 10;
@@ -1756,7 +1765,7 @@ SUM(t1.col1)
 SELECT COUNT_STAR > 0 FROM performance_schema.file_summary_by_event_name
 WHERE event_name LIKE '%hash_join%';
 COUNT_STAR > 0
-0
+1
 SET join_buffer_size = DEFAULT;
 DROP TABLE t1,t2;
 #
@@ -2124,10 +2133,11 @@ test.t1	analyze	status	OK
 test.t2	analyze	status	OK
 EXPLAIN FORMAT=tree SELECT * FROM t1 WHERE (t1.i) IN (SELECT t2.i FROM t2);
 EXPLAIN
--> Hash semijoin (t2.i = t1.i)  (cost=0.83 rows=2)
-    -> Table scan on t1  (cost=0.45 rows=2)
-    -> Hash
-        -> Table scan on t2  (cost=0.18 rows=2)
+-> Parallel scan on <temporary>
+    -> Hash semijoin (t2.i = t1.i)  (cost=0.83 rows=2)
+        -> PQblock scan on t1  (cost=0.45 rows=2)
+        -> Hash
+            -> Table scan on t2  (cost=0.18 rows=2)
 
 SELECT * FROM t1 WHERE (t1.i) IN (SELECT t2.i FROM t2);
 i
@@ -2145,11 +2155,12 @@ EXPLAIN FORMAT=tree
 SELECT * FROM t1 WHERE (t1.col1) IN
 (SELECT t2.col1 FROM t2 WHERE t2.col2 < 3);
 EXPLAIN
--> Hash semijoin (t2.col1 = t1.col1)  (cost=0.78 rows=1)
-    -> Table scan on t1  (cost=0.45 rows=2)
-    -> Hash
-        -> Filter: (t2.col2 < 3)  (cost=0.23 rows=1)
-            -> Table scan on t2  (cost=0.23 rows=2)
+-> Parallel scan on <temporary>
+    -> Hash semijoin (t2.col1 = t1.col1)  (cost=0.78 rows=1)
+        -> PQblock scan on t1  (cost=0.45 rows=2)
+        -> Hash
+            -> Filter: (t2.col2 < 3)  (cost=0.23 rows=1)
+                -> Table scan on t2  (cost=0.23 rows=2)
 
 DROP TABLE t1, t2;
 # Test a query where the optimizer will create a semijoin condition that
@@ -2166,10 +2177,11 @@ test.t1	analyze	status	OK
 test.t2	analyze	status	OK
 EXPLAIN FORMAT=tree SELECT * FROM t1 WHERE 1 IN (SELECT t1.col1 = t2.col1 FROM t2);
 EXPLAIN
--> Hash semijoin (no condition), extra conditions: (1 = (t1.col1 = t2.col1))  (cost=2.50 rows=16)
-    -> Table scan on t1  (cost=0.65 rows=4)
-    -> Hash
-        -> Table scan on t2  (cost=0.65 rows=4)
+-> Parallel scan on <temporary>
+    -> Hash semijoin (no condition), extra conditions: (1 = (t1.col1 = t2.col1))  (cost=2.50 rows=16)
+        -> PQblock scan on t1  (cost=0.65 rows=4)
+        -> Hash
+            -> Table scan on t2  (cost=0.65 rows=4)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.col1' of SELECT #2 was resolved in SELECT #1
@@ -2194,13 +2206,14 @@ SET optimizer_switch="materialization=off,duplicateweedout=off";
 EXPLAIN FORMAT=tree SELECT * FROM t1 LEFT JOIN t2 ON t1.a=t2.a
 WHERE (t1.a,t2.a) IN (SELECT a, a FROM t3);
 EXPLAIN
--> Hash semijoin (t3.a = t1.a)  (cost=0.70 rows=1)
-    -> Inner hash join (t2.a = t1.a)  (cost=0.70 rows=1)
-        -> Table scan on t2  (cost=0.35 rows=1)
+-> Parallel scan on <temporary>
+    -> Hash semijoin (t3.a = t1.a)  (cost=0.70 rows=1)
+        -> Inner hash join (t2.a = t1.a)  (cost=0.70 rows=1)
+            -> Table scan on t2  (cost=0.35 rows=1)
+            -> Hash
+                -> PQblock scan on t1  (cost=0.35 rows=1)
         -> Hash
-            -> Table scan on t1  (cost=0.35 rows=1)
-    -> Hash
-        -> Table scan on t3  (cost=0.35 rows=1)
+            -> Table scan on t3  (cost=0.35 rows=1)
 
 SELECT * FROM t1 LEFT JOIN t2 ON t1.a=t2.a
 WHERE (t1.a,t2.a) IN (SELECT a, a FROM t3);
@@ -2242,11 +2255,13 @@ SET optimizer_switch = "materialization=off";
 EXPLAIN FORMAT=tree SELECT SUM(t1.col1), SUM(t1.col2) FROM t1 WHERE t1.col1 IN
 (SELECT t2.col1 FROM t2);
 EXPLAIN
--> Aggregate: sum(t1.col1), sum(t1.col2)
-    -> Hash semijoin (t2.col1 = t1.col1)  (cost=104883.37 rows=104858)
-        -> Table scan on t1  (cost=103.65 rows=1024)
-        -> Hash
-            -> Table scan on t2  (cost=3.27 rows=1024)
+-> Aggregate: sum(`SUM(t1.col1)`), sum(`SUM(t1.col2)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: sum(t1.col1), sum(t1.col2)
+            -> Hash semijoin (t2.col1 = t1.col1)  (cost=104883.37 rows=104858)
+                -> PQblock scan on t1  (cost=103.65 rows=1024)
+                -> Hash
+                    -> Table scan on t2  (cost=3.27 rows=1024)
 
 SELECT SUM(t1.col1), SUM(t1.col2) FROM t1 WHERE t1.col1 IN
 (SELECT t2.col1 FROM t2);
@@ -2255,11 +2270,13 @@ SUM(t1.col1)	SUM(t1.col2)
 EXPLAIN FORMAT=tree SELECT SUM(t1.col1), SUM(t1.col2) FROM t1 WHERE t1.col1 IN
 (SELECT t2.col1 FROM t2 WHERE t1.col2 <> t2.col2);
 EXPLAIN
--> Aggregate: sum(t1.col1), sum(t1.col2)
-    -> Hash semijoin (t2.col1 = t1.col1), extra conditions: (t1.col2 <> t2.col2)  (cost=104882.95 rows=94372)
-        -> Table scan on t1  (cost=103.65 rows=1024)
-        -> Hash
-            -> Table scan on t2  (cost=2.85 rows=1024)
+-> Aggregate: sum(`SUM(t1.col1)`), sum(`SUM(t1.col2)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: sum(t1.col1), sum(t1.col2)
+            -> Hash semijoin (t2.col1 = t1.col1), extra conditions: (t1.col2 <> t2.col2)  (cost=104882.95 rows=94372)
+                -> PQblock scan on t1  (cost=103.65 rows=1024)
+                -> Hash
+                    -> Table scan on t2  (cost=2.85 rows=1024)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.col2' of SELECT #2 was resolved in SELECT #1
@@ -2298,11 +2315,13 @@ SET join_buffer_size = 128;
 SET optimizer_switch="materialization=off";
 EXPLAIN FORMAT=tree SELECT COUNT(*) FROM probe WHERE col1 IN (SELECT col1 FROM build);
 EXPLAIN
--> Aggregate: count(0)
-    -> Hash semijoin (build.col1 = probe.col1)  (cost=19669.28 rows=19661)
-        -> Table scan on probe  (cost=25.85 rows=256)
-        -> Hash
-            -> Table scan on build  (cost=3.73 rows=768)
+-> Aggregate: count(`COUNT(*)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: count(0)
+            -> Hash semijoin (build.col1 = probe.col1)  (cost=19669.28 rows=19661)
+                -> PQblock scan on probe  (cost=25.85 rows=256)
+                -> Hash
+                    -> Table scan on build  (cost=3.73 rows=768)
 
 SELECT COUNT(*) FROM probe WHERE col1 IN (SELECT col1 FROM build);
 COUNT(*)
@@ -2332,10 +2351,11 @@ SET optimizer_switch = "materialization=off";
 SET join_buffer_size = 1024;
 EXPLAIN FORMAT=tree SELECT * FROM probe WHERE col1 IN (SELECT * FROM build);
 EXPLAIN
--> Hash semijoin (build.col1 = probe.col1)  (cost=13109.20 rows=13107)
-    -> Table scan on probe  (cost=25.85 rows=256)
-    -> Hash
-        -> Table scan on build  (cost=1.19 rows=512)
+-> Parallel scan on <temporary>
+    -> Hash semijoin (build.col1 = probe.col1)  (cost=13109.20 rows=13107)
+        -> PQblock scan on probe  (cost=25.85 rows=256)
+        -> Hash
+            -> Table scan on build  (cost=1.19 rows=512)
 
 SELECT * FROM probe WHERE col1 IN (SELECT * FROM build);
 col1
@@ -2931,10 +2951,11 @@ test.t2	analyze	status	OK
 EXPLAIN FORMAT=tree SELECT * FROM t1
 WHERE t1.aid NOT IN (SELECT aid FROM t2 WHERE bid = t1.bid);
 EXPLAIN
--> Hash antijoin (t2.bid = t1.bid), (t2.aid = t1.aid)  (cost=1.28 rows=8)
-    -> Table scan on t1  (cost=0.65 rows=4)
-    -> Hash
-        -> Table scan on t2  (cost=0.23 rows=2)
+-> Parallel scan on <temporary>
+    -> Hash antijoin (t2.bid = t1.bid), (t2.aid = t1.aid)  (cost=1.28 rows=8)
+        -> PQblock scan on t1  (cost=0.65 rows=4)
+        -> Hash
+            -> Table scan on t2  (cost=0.23 rows=2)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.bid' of SELECT #2 was resolved in SELECT #1
@@ -2951,10 +2972,11 @@ INSERT INTO t1 VALUES (NULL);
 EXPLAIN FORMAT=tree SELECT * FROM t1
 WHERE 1 IN (SELECT 1 FROM t2 WHERE t1.col1 = t2.col1) IS FALSE;
 EXPLAIN
--> Hash antijoin (t2.col1 = t1.col1)  (cost=0.70 rows=1)
-    -> Table scan on t1  (cost=0.35 rows=1)
-    -> Hash
-        -> Table scan on t2  (cost=0.35 rows=1)
+-> Parallel scan on <temporary>
+    -> Hash antijoin (t2.col1 = t1.col1)  (cost=0.70 rows=1)
+        -> PQblock scan on t1  (cost=0.35 rows=1)
+        -> Hash
+            -> Table scan on t2  (cost=0.35 rows=1)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.col1' of SELECT #2 was resolved in SELECT #1
@@ -2997,11 +3019,13 @@ SET optimizer_switch = "materialization=off";
 EXPLAIN FORMAT=tree SELECT SUM(t1.col1), SUM(t1.col2) FROM t1 WHERE t1.col1 NOT IN
 (SELECT t2.col1 FROM t2);
 EXPLAIN
--> Aggregate: sum(t1.col1), sum(t1.col2)
-    -> Hash antijoin (t2.col1 = t1.col1)  (cost=105002.50 rows=1048576)
-        -> Table scan on t1  (cost=103.65 rows=1024)
-        -> Hash
-            -> Table scan on t2  (cost=123.65 rows=1024)
+-> Aggregate: sum(`SUM(t1.col1)`), sum(`SUM(t1.col2)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: sum(t1.col1), sum(t1.col2)
+            -> Hash antijoin (t2.col1 = t1.col1)  (cost=105002.50 rows=1048576)
+                -> PQblock scan on t1  (cost=103.65 rows=1024)
+                -> Hash
+                    -> Table scan on t2  (cost=123.65 rows=1024)
 
 SELECT SUM(t1.col1), SUM(t1.col2) FROM t1 WHERE t1.col1 NOT IN
 (SELECT t2.col1 FROM t2);
@@ -3010,11 +3034,13 @@ NULL	NULL
 EXPLAIN FORMAT=tree SELECT SUM(t1.col1), SUM(t1.col2) FROM t1 WHERE t1.col1 NOT IN
 (SELECT t2.col1 FROM t2 WHERE t1.col2 < t2.col2);
 EXPLAIN
--> Aggregate: sum(t1.col1), sum(t1.col2)
-    -> Hash antijoin (t2.col1 = t1.col1), extra conditions: (t1.col2 < t2.col2)  (cost=105002.50 rows=1048576)
-        -> Table scan on t1  (cost=103.65 rows=1024)
-        -> Hash
-            -> Table scan on t2  (cost=123.65 rows=1024)
+-> Aggregate: sum(`SUM(t1.col1)`), sum(`SUM(t1.col2)`)
+    -> Parallel scan on <temporary>
+        -> Aggregate: sum(t1.col1), sum(t1.col2)
+            -> Hash antijoin (t2.col1 = t1.col1), extra conditions: (t1.col2 < t2.col2)  (cost=105002.50 rows=1048576)
+                -> PQblock scan on t1  (cost=103.65 rows=1024)
+                -> Hash
+                    -> Table scan on t2  (cost=123.65 rows=1024)
 
 Warnings:
 Note	1276	Field or reference 'test.t1.col2' of SELECT #2 was resolved in SELECT #1
@@ -3051,10 +3077,11 @@ SET join_buffer_size = 128;
 SET optimizer_switch="materialization=off";
 EXPLAIN FORMAT=tree SELECT * FROM probe WHERE col1 NOT IN (SELECT col1 FROM build);
 EXPLAIN
--> Hash antijoin (build.col1 = probe.col1)  (cost=19855.77 rows=196096)
-    -> Table scan on probe  (cost=25.85 rows=256)
-    -> Hash
-        -> Table scan on build  (cost=241.92 rows=766)
+-> Parallel scan on <temporary>
+    -> Hash antijoin (build.col1 = probe.col1)  (cost=19855.77 rows=196096)
+        -> PQblock scan on probe  (cost=25.85 rows=256)
+        -> Hash
+            -> Table scan on build  (cost=241.92 rows=766)
 
 SELECT * FROM probe WHERE col1 NOT IN (SELECT col1 FROM build);
 col1
@@ -3245,10 +3272,11 @@ LEFT JOIN t1 ON tt.t = 'crash2' AND tt.f2 = t1.f2
 WHERE
 tt.t = 'crash1';
 EXPLAIN
--> Left hash join (t1.f2 = t1.f2)  (cost=0.25 rows=0)
-    -> Table scan on t1  (cost=0.45 rows=2)
-    -> Hash
-        -> Zero rows (Impossible filter)  (cost=0.00 rows=0)
+-> Parallel scan on <temporary>
+    -> Left hash join (t1.f2 = t1.f2)  (cost=0.25 rows=0)
+        -> PQblock scan on t1  (cost=0.45 rows=2)
+        -> Hash
+            -> Zero rows (Impossible filter)  (cost=0.00 rows=0)
 
 SELECT
 tt.t
@@ -3437,13 +3465,14 @@ test.t1	analyze	status	OK
 EXPLAIN FORMAT=tree SELECT * FROM t1 AS alias1 LEFT JOIN t1 AS alias2 ON NOT EXISTS (
 SELECT * FROM t1 WHERE alias1.pk NOT IN ( 20 ) );
 EXPLAIN
--> Nested loop left join  (cost=802.50 rows=8000)
-    -> Index scan on alias1 using PRIMARY  (cost=2.25 rows=20)
-    -> Hash antijoin (no condition)  (cost=40.37 rows=400)
-        -> Index scan on alias2 using PRIMARY  (cost=0.11 rows=20)
-        -> Hash
-            -> Filter: (alias1.pk <> 20)  (cost=0.11 rows=20)
-                -> Index scan on t1 using PRIMARY  (cost=0.11 rows=20)
+-> Parallel scan on <temporary>
+    -> Nested loop left join  (cost=802.50 rows=8000)
+        -> PQblock scan on alias1 using PRIMARY  (cost=2.25 rows=20)
+        -> Hash antijoin (no condition)  (cost=40.37 rows=400)
+            -> Index scan on alias2 using PRIMARY  (cost=0.11 rows=20)
+            -> Hash
+                -> Filter: (alias1.pk <> 20)  (cost=0.11 rows=20)
+                    -> Index scan on t1 using PRIMARY  (cost=0.11 rows=20)
 
 Warnings:
 Note	1276	Field or reference 'test.alias1.pk' of SELECT #2 was resolved in SELECT #1
@@ -3498,14 +3527,15 @@ INSERT INTO t1 VALUES ( 100 ), ( 200 );
 EXPLAIN FORMAT=tree SELECT * FROM t1 AS alias1 LEFT JOIN t1 AS alias2 ON alias2.f1 = alias1.f1
 AND NOT EXISTS ( SELECT * FROM t1 AS alias3 WHERE alias1.f1 <= 1 );
 EXPLAIN
--> Nested loop left join  (cost=1.50 rows=8)
-    -> Table scan on alias1  (cost=0.45 rows=2)
-    -> Filter: (alias2.f1 = alias1.f1)  (cost=0.88 rows=4)
-        -> Hash antijoin (no condition)  (cost=0.88 rows=4)
-            -> Table scan on alias2  (cost=0.23 rows=2)
-            -> Hash
-                -> Filter: (alias1.f1 <= 1)  (cost=0.23 rows=2)
-                    -> Table scan on alias3  (cost=0.23 rows=2)
+-> Parallel scan on <temporary>
+    -> Nested loop left join  (cost=1.50 rows=8)
+        -> PQblock scan on alias1  (cost=0.45 rows=2)
+        -> Filter: (alias2.f1 = alias1.f1)  (cost=0.88 rows=4)
+            -> Hash antijoin (no condition)  (cost=0.88 rows=4)
+                -> Table scan on alias2  (cost=0.23 rows=2)
+                -> Hash
+                    -> Filter: (alias1.f1 <= 1)  (cost=0.23 rows=2)
+                        -> Table scan on alias3  (cost=0.23 rows=2)
 
 Warnings:
 Note	1276	Field or reference 'test.alias1.f1' of SELECT #2 was resolved in SELECT #1
@@ -3578,19 +3608,20 @@ JOIN t1 AS inner_t3 ON inner_t1.f1 = inner_t2.f1
 SELECT * FROM t1 WHERE table2.pk >= 1 OR table1.f1 = 'G'
     );
 EXPLAIN
--> Nested loop left join
-    -> Table scan on table1  (cost=0.65 rows=4)
-    -> Batched key access inner join
-        -> Batch input rows
-            -> Inner hash join (no condition)  (cost=8.66 rows=64)
-                -> Table scan on inner_t1  (cost=0.04 rows=4)
-                -> Hash
-                    -> Hash antijoin (no condition), extra conditions: ((inner_t3.pk >= 1) or (table1.f1 = 'G'))  (cost=2.01 rows=16)
-                        -> Table scan on inner_t3  (cost=0.16 rows=4)
-                        -> Hash
-                            -> Index scan on t1 using i1  (cost=0.16 rows=4)
-        -> Filter: (inner_t2.f1 = inner_t1.f1)
-            -> Multi-range index lookup on inner_t2 using i1 (pk=inner_t1.pk)
+-> Parallel scan on <temporary>
+    -> Nested loop left join
+        -> PQblock scan on table1  (cost=0.65 rows=4)
+        -> Batched key access inner join
+            -> Batch input rows
+                -> Inner hash join (no condition)  (cost=8.66 rows=64)
+                    -> Table scan on inner_t1  (cost=0.04 rows=4)
+                    -> Hash
+                        -> Hash antijoin (no condition), extra conditions: ((inner_t3.pk >= 1) or (table1.f1 = 'G'))  (cost=2.01 rows=16)
+                            -> Table scan on inner_t3  (cost=0.16 rows=4)
+                            -> Hash
+                                -> Index scan on t1 using i1  (cost=0.16 rows=4)
+            -> Filter: (inner_t2.f1 = inner_t1.f1)
+                -> Multi-range index lookup on inner_t2 using i1 (pk=inner_t1.pk)
 
 Warnings:
 Note	1276	Field or reference 'table2.pk' of SELECT #3 was resolved in SELECT #1
