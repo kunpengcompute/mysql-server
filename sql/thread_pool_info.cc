@@ -70,10 +70,10 @@ static int groups_fill_table(THD* thd, TABLE_LIST* tables, Item*)
     /* IS_STALLED */
     table->field[7]->store(group->stalled, true);
 
+    mysql_mutex_unlock(&group->mutex);
+
     if (schema_table_store_record(thd, table))
       return 1;
-
-    mysql_mutex_unlock(&group->mutex);
   }
   return 0;
 }
@@ -95,7 +95,7 @@ static ST_FIELD_INFO queues_field_info[] =
   {"GROUP_ID", 6, MYSQL_TYPE_LONG, 0, 0, 0, SKIP_OPEN_TABLE},
   {"POSITION", 6, MYSQL_TYPE_LONG, 0, 0, 0, SKIP_OPEN_TABLE},
   {"PRIORITY", 1, MYSQL_TYPE_LONG, 0, 0, 0, SKIP_OPEN_TABLE},
-  {"CONNECTION_ID", 19, MYSQL_TYPE_LONGLONG, 0, 0, 0, SKIP_OPEN_TABLE},
+  {"CONNECTION_ID", 19, MYSQL_TYPE_LONGLONG, 0, MY_I_S_UNSIGNED, 0, SKIP_OPEN_TABLE},
   {"QUEUEING_TIME_MICROSECONDS", 19, MYSQL_TYPE_LONGLONG, 0, 0, 0, SKIP_OPEN_TABLE},
   {0, 0, MYSQL_TYPE_STRING, 0, 0, 0, SKIP_OPEN_TABLE}
 };
@@ -134,7 +134,7 @@ static int queues_fill_table(THD* thd, TABLE_LIST* tables, Item*)
         /* PRIORITY */
         table->field[2]->store(prio, true);
         /* CONNECTION_ID */
-        if (c->thd) {
+        if (c->thd != nullptr) {
           table->field[3]->store(c->thd->thread_id(), true);
         } else {
           table->field[3]->store(0, true);
