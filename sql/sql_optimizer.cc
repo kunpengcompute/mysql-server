@@ -969,7 +969,7 @@ bool JOIN::optimize() {
   if (thd->m_suite_for_pq == PqConditionStatus::ENABLED)
   {
     // save temp table param for later PQ scan
-    saved_tmp_table_param = new (thd->pq_mem_root) Temp_table_param();
+    saved_tmp_table_param = new (thd->mem_root) Temp_table_param();
     if (!saved_tmp_table_param) return true;
 
     saved_tmp_table_param->pq_copy(tmp_table_param);
