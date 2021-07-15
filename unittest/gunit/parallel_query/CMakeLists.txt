@@ -21,6 +21,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
 SET(TESTS
+  pq_copy_table_list
   pq_condition
   message_queue
 )
