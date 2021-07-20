@@ -47,5 +47,5 @@ extern Item **resolve_ref_in_select_and_group(THD *thd, Item_ident *ref,
                                               SELECT_LEX *select);
 
 JOIN *pq_make_join(THD *thd, JOIN *join);
-bool copy_all_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select);
+bool copy_all_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select);
 #endif  // PQ_CLONE_INCLUDE_H
