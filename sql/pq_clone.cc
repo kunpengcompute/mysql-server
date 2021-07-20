@@ -546,7 +546,7 @@ TABLE_LIST *copy_table(THD *thd, TABLE_LIST *src, SELECT_LEX *select, SELECT_LEX
   return ptr;                
 }
 
-bool copy_table_field( TABLE_LIST * src, TABLE_LIST * des, THD *thd, SELECT_LEX *des_select) {
+bool copy_table_field( TABLE_LIST * src, TABLE_LIST * des, THD *thd, SELECT_LEX *dest_select) {
   int count = src->field_translation_end - src->field_translation;
   if (count <= 0) {
     return false;
@@ -562,7 +562,7 @@ bool copy_table_field( TABLE_LIST * src, TABLE_LIST * des, THD *thd, SELECT_LEX 
     if (src->field_translation[i].item == nullptr) {
       return true;
     }
-    des->field_translation[i].item = src->field_translation[i].item->pq_clone(thd, des_select);
+    des->field_translation[i].item = src->field_translation[i].item->pq_clone(thd, dest_select);
     if (des->field_translation[i].item == nullptr) {
       return true;
     }
@@ -570,8 +570,8 @@ bool copy_table_field( TABLE_LIST * src, TABLE_LIST * des, THD *thd, SELECT_LEX 
   return false;
 }
 
-bool copy_merge_table_field(THD *thd, SELECT_LEX *des_select, int tableindex, int mergeindex, TABLE_LIST *srctb) {
-  TABLE_LIST * tb =  get_table_by_index(des_select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
+bool copy_merge_table_field(THD *thd, SELECT_LEX *dest_select, int tableindex, int mergeindex, TABLE_LIST *srctb) {
+  TABLE_LIST * tb =  get_table_by_index(dest_select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
   if (tb == nullptr) {
     return true;
   }
@@ -579,21 +579,21 @@ bool copy_merge_table_field(THD *thd, SELECT_LEX *des_select, int tableindex, in
   if (mergetable == nullptr) {
     return true;
   }
-  if (copy_table_field(srctb, mergetable, thd, des_select)) {
+  if (copy_table_field(srctb, mergetable, thd, dest_select)) {
     return true;
   }
   return false;
 }
 
-bool copy_global_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+bool copy_global_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
   int tableindex = 0;
   for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_global) {
     if (tbl_list->field_translation != nullptr) {
-      TABLE_LIST * src = get_table_by_index(des_select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, tableindex);
+      TABLE_LIST * src = get_table_by_index(dest_select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, tableindex);
       if (src == nullptr) {
         return true;
       }
-      if (copy_table_field(tbl_list,src, thd, des_select)) {
+      if (copy_table_field(tbl_list,src, thd, dest_select)) {
         return true;
       }
     }
@@ -620,15 +620,15 @@ bool init_table_field_space(THD *thd, TABLE_LIST *src, TABLE_LIST *des) {
   return false;
 }
 
-bool copy_leaf_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+bool copy_leaf_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
   TABLE_LIST *last = nullptr;
   for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_leaf) {
-    TABLE_LIST *tl = copy_table(thd, tbl_list, des_select, orig);
+    TABLE_LIST *tl = copy_table(thd, tbl_list, dest_select, orig);
     if (tl == nullptr) {
       return true;
     }
-    if (des_select->leaf_tables == nullptr) {
-      des_select->leaf_tables = tl;
+    if (dest_select->leaf_tables == nullptr) {
+      dest_select->leaf_tables = tl;
       last = tl;
     } else {
       last->next_name_resolution_table = tl; 
@@ -654,14 +654,14 @@ void set_up_leaf_tables(THD *thd, SELECT_LEX *select) {
   }
   if (select->opt_hints_qb) select->opt_hints_qb->check_unresolved(thd);
 }
-bool copy_global_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+bool copy_global_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
   for (TABLE_LIST *tbl_list = orig->leaf_tables; tbl_list != nullptr; tbl_list = tbl_list->next_global) {
     int  index = get_table_index(orig->leaf_tables, TABLE_LIST_TYPE_LEAF, tbl_list);
     TABLE_LIST *tmp = nullptr;
     if (index != -1) {
-      tmp = get_table_by_index(des_select->leaf_tables, TABLE_LIST_TYPE_LEAF, index);
+      tmp = get_table_by_index(dest_select->leaf_tables, TABLE_LIST_TYPE_LEAF, index);
     } else {
-      tmp = copy_table(thd, tbl_list, des_select, orig);
+      tmp = copy_table(thd, tbl_list, dest_select, orig);
     }
     if (tmp == nullptr) {
       return true;
@@ -670,19 +670,19 @@ bool copy_global_tables(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
   }
   return false;
 }
-bool copy_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+bool copy_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
   for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
     int index = get_table_index(orig->leaf_tables, TABLE_LIST_TYPE_GLOBAL, tbl_list);
     TABLE_LIST * tmp = nullptr;
     if (index != -1) {
-      tmp = get_table_by_index(des_select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, index);
+      tmp = get_table_by_index(dest_select->leaf_tables, TABLE_LIST_TYPE_GLOBAL, index);
     } else {
-      tmp = copy_table(thd, tbl_list, des_select, orig);
+      tmp = copy_table(thd, tbl_list, dest_select, orig);
     }
     if (tmp == nullptr) {
       return true;
     }
-    des_select->table_list.link_in_list(tmp, &tmp->next_local);
+    dest_select->table_list.link_in_list(tmp, &tmp->next_local);
   }
   return false;
 }
@@ -742,7 +742,7 @@ bool init_field_space(THD *thd, SELECT_LEX *orig, SELECT_LEX *select) {
   }
   return false;
 }
-bool copy_merge_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+bool copy_merge_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
   int tableindex = 0;
   int mergeindex = 0;
   for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
@@ -750,7 +750,7 @@ bool copy_merge_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_sel
       mergeindex = 0;
       for (TABLE_LIST *tb = tbl_list->merge_underlying_list; tb != nullptr; tb = tb->merge_underlying_list) {
         if (tb->field_translation != nullptr &&
-            copy_merge_table_field(thd, des_select, tableindex, mergeindex, tb)) {
+            copy_merge_table_field(thd, dest_select, tableindex, mergeindex, tb)) {
           return true;
         }
         mergeindex++;  
@@ -760,15 +760,15 @@ bool copy_merge_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_sel
   }
   return false;
 }
-bool copy_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
+bool copy_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
   int tableindex = 0;
   for (TABLE_LIST *tbl_list = orig->table_list.first; tbl_list != nullptr; tbl_list = tbl_list->next_local) {
     if (tbl_list->field_translation != nullptr) {
-      TABLE_LIST * src = get_table_by_index(des_select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
+      TABLE_LIST * src = get_table_by_index(dest_select->table_list.first, TABLE_LIST_TYPE_DEFAULT, tableindex);
       if (src == nullptr) {
         return true;
       }
-      if (copy_table_field(tbl_list, src, thd, des_select)) {
+      if (copy_table_field(tbl_list, src, thd, dest_select)) {
         return true;
       }
     }
@@ -776,16 +776,16 @@ bool copy_table_list_field(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
   }
   return false;
 }
-bool copy_all_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *des_select) {
-  if (copy_leaf_tables(thd, orig, des_select) ||
-      copy_global_tables(thd, orig, des_select) ||
-      copy_table_list(thd, orig, des_select)) {
+bool copy_all_table_list(THD *thd, SELECT_LEX *orig, SELECT_LEX *dest_select) {
+  if (copy_leaf_tables(thd, orig, dest_select) ||
+      copy_global_tables(thd, orig, dest_select) ||
+      copy_table_list(thd, orig, dest_select)) {
     return true;
   }
-  if (init_field_space(thd, orig, des_select) ||
-      copy_merge_table_list_field(thd, orig, des_select) ||
-      copy_global_table_list_field(thd, orig, des_select) ||
-      copy_table_list_field(thd, orig, des_select)) {
+  if (init_field_space(thd, orig, dest_select) ||
+      copy_merge_table_list_field(thd, orig, dest_select) ||
+      copy_global_table_list_field(thd, orig, dest_select) ||
+      copy_table_list_field(thd, orig, dest_select)) {
     return true;
   }
   return false;
