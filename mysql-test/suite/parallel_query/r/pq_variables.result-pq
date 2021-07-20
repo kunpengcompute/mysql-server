@@ -61,12 +61,14 @@ Warnings:
 Note	1003	/* select#1 */ select sum(`test`.`t1`.`id`) AS `sum(id)` from `test`.`t1`
 explain select/*+ PQ */ sum(id) from t1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1024	100.00	NULL
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1024	100.00	Parallel execute (3 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1024	100.00	NULL
 Warnings:
 Note	1003	/* select#1 */ select /*+ PQ(@`select#1`) */ sum(`test`.`t1`.`id`) AS `sum(id)` from `test`.`t1`
 explain select/*+ PQ(10) */ sum(id) from t1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1024	100.00	NULL
+1	SIMPLE	<gather2>	NULL	ALL	NULL	NULL	NULL	NULL	1024	100.00	Parallel execute (3 workers)
+2	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1024	100.00	NULL
 Warnings:
 Note	1003	/* select#1 */ select /*+ PQ(@`select#1`) */ sum(`test`.`t1`.`id`) AS `sum(id)` from `test`.`t1`
 ### test force_parallel query
